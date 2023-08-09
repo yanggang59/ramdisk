@@ -9,47 +9,44 @@
 #include <linux/pgtable.h>
 #include <asm/setup.h>
 
-#define DEVICE_NAME "BLOCKDEVRAM"
-#define BLOCKDEVRAM_MAJOR 250
-
-
-static u_long blockdevram_size = 0;
+#define DEVICE_NAME                "BLOCKDEVRAM"
+#define BLOCKDEVRAM_MAJOR          250
+#define RAM_BLOCK_SIZE             (1024 * 1024)  
 
 static DEFINE_SPINLOCK(blockdevram_lock);
 
 static struct gendisk *blockdevram_gendisk;
 
+static char* ramdisk_buf;
+
+static void do_request(struct request *req)
+{	
+	unsigned long start = blk_rq_pos(req) << 9;  	/* blk_rq_pos获取到的是扇区地址，左移9位转换为字节地址 */
+	unsigned long len  = blk_rq_cur_bytes(req);		/* 大小   */
+
+    static int w_cnt = 0;
+    static int r_cnt = 0;
+	void *buffer = bio_data(req->bio);		
+	
+	if(rq_data_dir(req) == READ) {
+        printk("[Info] do_ramdisk_request read %d \r\n", ++r_cnt);
+		memcpy(buffer, ramdisk_buf + start, len);
+    } else if(rq_data_dir(req) == WRITE) {
+        printk("[Info] do_ramdisk_request write %d \r\n", ++w_cnt);
+        memcpy(ramdisk_buf + start, buffer, len);
+    }
+
+}
+
 static blk_status_t blockdev_queue_rq(struct blk_mq_hw_ctx *hctx,
 				const struct blk_mq_queue_data *bd)
 {
 	struct request *req = bd->rq;
-	unsigned long start = blk_rq_pos(req) << 9;
-	unsigned long len = blk_rq_cur_bytes(req);
-
 	blk_mq_start_request(req);
-
-	if (start + len > blockdevram_size) {
-		pr_err(DEVICE_NAME ": bad access: block=%llu, "
-		       "count=%u\n",
-		       (unsigned long long)blk_rq_pos(req),
-		       blk_rq_cur_sectors(req));
-		return BLK_STS_IOERR;
-	}
 
 	spin_lock_irq(&blockdevram_lock);
 
-	while (len) {
-		unsigned long addr = start ;
-		unsigned long size = len;
-		void *buffer = bio_data(req->bio);
-
-		if (rq_data_dir(req) == READ)
-			memcpy(buffer, (char *)addr, size);
-		else
-			memcpy((char *)addr, buffer, size);
-		start += size;
-		len -= size;
-	}
+	do_request(req);
 
 	spin_unlock_irq(&blockdevram_lock);
 	blk_mq_end_request(req, BLK_STS_OK);
@@ -99,6 +96,7 @@ static int blockdevram_register_disk(void)
 	err = add_disk(disk);
 	if (err)
 		put_disk(disk);
+	set_capacity(disk, (RAM_BLOCK_SIZE >> 9));
 	return err;
 }
 
@@ -108,6 +106,8 @@ static int __init blockdev_init(void)
 
 	if (register_blkdev(BLOCKDEVRAM_MAJOR, DEVICE_NAME))
 		return -EBUSY;
+
+	ramdisk_buf = kmalloc(RAM_BLOCK_SIZE,GFP_KERNEL);
 
 	tag_set.ops = &blockdev_mq_ops;
 	tag_set.nr_hw_queues = 1;
