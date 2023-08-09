@@ -1,4 +1,4 @@
-KSRC ?= /home/thomas/RK3568/rk356x_linux/kernel
+KSRC ?= /lib/modules/`uname -r`/build
 
 all:
 	make -C $(KSRC)/ M=`pwd` modules
@@ -6,4 +6,4 @@ all:
 %:
 	make -C $(KSRC)/ M=$(CURDIR) $@
 
-obj-m +=ramdisk.o
+obj-m +=blockdev.o
