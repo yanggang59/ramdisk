@@ -1,33 +1,3 @@
-/*
-** blockdevram - Amiga pseudo-driver to access 16bit-RAM in ZorroII space
-**         as a block device, to be used as a RAM disk or swap space
-** 
-** Copyright (C) 1994 by Ingo Wilken (Ingo.Wilken@informatik.uni-oldenburg.de)
-**
-** ++Geert: support for zorro_unused_blockdevram, better range checking
-** ++roman: translate accesses via an array
-** ++Milan: support for ChipRAM usage
-** ++yambo: converted to 2.0 kernel
-** ++yambo: modularized and support added for 3 minor devices including:
-**          MAJOR  MINOR  DESCRIPTION
-**          -----  -----  ----------------------------------------------
-**          37     0       Use Zorro II and Chip ram
-**          37     1       Use only Zorro II ram
-**          37     2       Use only Chip ram
-**          37     4-7     Use memory list entry 1-4 (first is 0)
-** ++jskov: support for 1-4th memory list entry.
-**
-** Permission to use, copy, modify, and distribute this software and its
-** documentation for any purpose and without fee is hereby granted, provided
-** that the above copyright notice appear in all copies and that both that
-** copyright notice and this permission notice appear in supporting
-** documentation.  This software is provided "as is" without express or
-** implied warranty.
-*/
-
-#define DEVICE_NAME "BLOCKDEVRAM"
-#define BLOCKDEVRAM_MAJOR 250
-
 #include <linux/major.h>
 #include <linux/vmalloc.h>
 #include <linux/init.h>
@@ -37,24 +7,11 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/pgtable.h>
-
 #include <asm/setup.h>
-//#include <asm/amigahw.h>
 
-//#include <linux/zorro.h>
+#define DEVICE_NAME "BLOCKDEVRAM"
+#define BLOCKDEVRAM_MAJOR 250
 
-#define BLOCKDEVMINOR_COMBINED      (0)
-#define BLOCKDEVMINOR_BLOCKDEVONLY        (1)
-#define BLOCKDEVMINOR_CHIPONLY      (2)
-#define BLOCKDEVMINOR_MEMLIST1      (4)
-#define BLOCKDEVMINOR_MEMLIST2      (5)
-#define BLOCKDEVMINOR_MEMLIST3      (6)
-#define BLOCKDEVMINOR_MEMLIST4      (7)
-#define BLOCKDEVMINOR_COUNT         (8)	/* Move this down when adding a new minor */
-
-#define BLOCKDEVRAM_CHUNK1024       ( BLOCKDEVRAM_CHUNKSIZE >> 10 )
-
-static DEFINE_MUTEX(blockdevram_mutex);
 
 static u_long blockdevram_size = 0;
 
@@ -163,9 +120,10 @@ static int __init blockdev_init(void)
 		goto out_unregister_blkdev;
 
     ret = blockdevram_register_disk();
-    if (ret)
-        goto out_free_tagset;
-
+    if (ret) {
+		goto out_free_tagset;
+	}
+        
 	return 0;
 
 out_free_tagset:
