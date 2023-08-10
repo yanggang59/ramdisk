@@ -161,6 +161,7 @@ static void __exit blockdev_exit(void)
     del_gendisk(blockdevram_gendisk);
     put_disk(blockdevram_gendisk);
 	blk_mq_free_tag_set(&tag_set);
+	kfree(ramdisk_buf);
 	return;
 }
 
