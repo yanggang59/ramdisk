@@ -20,6 +20,8 @@
 #else
 #define NUPA_BLOCK_SIZE                                 RESERVE_MEM_SIZE
 #endif
+#define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
+#define SECTORS_PER_PAGE	(1 << SECTORS_PER_PAGE_SHIFT)
 
 static DEFINE_SPINLOCK(nupa_lock);
 static struct gendisk *nupa_gendisk;
@@ -28,10 +30,12 @@ static int major;
 
 static void do_request(struct request *req)
 {	
+#if 1
 	unsigned long start = blk_rq_pos(req) << 9;	
 	unsigned long len  = blk_rq_cur_bytes(req);
-
-	void *buffer = bio_data(req->bio);		
+	void *buffer = bio_data(req->bio);	
+	printk("[Info] start = %ld , len = %ld \r", start, len);
+	
 	
 	if(rq_data_dir(req) == READ) {
         //printk("[Info] do_request read sector %ld \r\n", start);
@@ -40,7 +44,38 @@ static void do_request(struct request *req)
         //printk("[Info] do_request write sector %ld \r\n", start);
         memcpy(nupa_buf + start, buffer, len);
     }
+#else
+	struct bio *bio = req->bio;
+	struct bio_vec bvec;
+	struct bvec_iter iter;
+    void *dsk_mem;
+    //获得块设备内存的起始地址，bi_sector代表起始扇区
+    dsk_mem = nupa_buf + (bio->bi_iter.bi_sector << 9);
+    bio_for_each_segment(bvec, bio, iter) {//遍历每一个块
+        void *iovec_mem;
+        switch (bio_op(bio)) {
+            case REQ_OP_READ:
+                //page代表高端内存无法直接访问，需要通过kmap映射到线性地址
+                iovec_mem = kmap(bvec.bv_page) + bvec.bv_offset;//页数加偏移量获得对应的内存地址
+                memcpy(iovec_mem, dsk_mem, bvec.bv_len);//将数据拷贝到内存中
+                kunmap(bvec.bv_page);//归还线性地址
+                break;
+            case REQ_OP_WRITE:
+                iovec_mem = kmap(bvec.bv_page) + bvec.bv_offset; 
+                memcpy(dsk_mem, iovec_mem, bvec.bv_len); 
+                kunmap(bvec.bv_page);
+                break;
+            default:
+                printk("unknown value of bio_rw: %lu\n", bio_op(bio));
+                bio_endio(bio);//报错
+                return;
+        }
+        dsk_mem += bvec.bv_len;//移动地址
+    }
 
+	bio_endio(bio);
+	return;
+#endif
 }
 
 static blk_status_t nupa_queue_rq(struct blk_mq_hw_ctx *hctx,
@@ -85,33 +120,52 @@ static int nupa_fops_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 	return 0;
 }
 
+static void nupa_fops_submit_bio(struct bio *bio)
+{
+	int offset;
+	long start;
+	struct bio_vec bvec;
+	struct bvec_iter iter;
+
+	start = bio->bi_iter.bi_sector << SECTOR_SHIFT;
+
+	bio_for_each_segment(bvec, bio, iter) {
+		unsigned int len = bvec.bv_len;
+		struct page* page = bvec.bv_page;
+		void* dst = kmap(page);
+		offset = bvec.bv_offset;
+		if (bio_op(bio) == REQ_OP_READ) {
+			memcpy(dst + offset, nupa_buf + start, len);
+		} else if (bio_op(bio) == REQ_OP_WRITE) {
+			memcpy(nupa_buf + start, dst + offset, len);
+		}
+		start += len;
+		kunmap(page);
+	}
+	bio_endio(bio);
+}
+
 static const struct block_device_operations nupa_fops = {
 	.owner = THIS_MODULE,
 	.open = nupa_fops_open,
 	.release = nupa_fops_release,
 	.ioctl = nupa_fops_ioctl,
 	.getgeo = nupa_fops_getgeo,
+	.submit_bio = nupa_fops_submit_bio,
 };
 
-static struct blk_mq_tag_set tag_set;
-
-static const struct blk_mq_ops nupa_mq_ops = {
-	.queue_rq = nupa_queue_rq,
-};
-
-static int blockdevram_register_disk(void)
+static int nupa_register_disk(void)
 {
 	struct gendisk *disk;
 	int err;
 
-	disk = blk_mq_alloc_disk(&tag_set, NULL);
+	disk = blk_alloc_disk(NUMA_NO_NODE);
 	if (IS_ERR(disk))
 		return PTR_ERR(disk);
 
 	disk->major = major;
 	disk->first_minor = 0;
 	disk->minors = 1;
-	//disk->flags |= GENHD_FL_NO_PART_SCAN;
 	disk->fops = &nupa_fops;
 
 	sprintf(disk->disk_name, "nupa");
@@ -165,27 +219,14 @@ static int __init blockdev_init(void)
 	simple_buf_test(nupa_buf, 1024 * 1024);
 	printk("[Info] nupa_buf = %p \r\n", nupa_buf);
 #endif	
-	tag_set.ops = &nupa_mq_ops;
-	tag_set.nr_hw_queues = 1;
-	tag_set.nr_maps = 1;
-	tag_set.queue_depth = 16;
-	tag_set.numa_node = NUMA_NO_NODE;
-	tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
-	ret = blk_mq_alloc_tag_set(&tag_set);
-	if (ret)
-		goto out_unregister_blkdev;
-
-    ret = blockdevram_register_disk();
+    ret = nupa_register_disk();
     if (ret) {
-		goto out_free_tagset;
+		goto out;
 	}
         
 	return 0;
 
-out_free_tagset:
-	blk_mq_free_tag_set(&tag_set);
-out_unregister_blkdev:
-	unregister_blkdev(major, DEVICE_NAME);
+out:
 	return ret;
 }
 
@@ -195,7 +236,6 @@ static void __exit blockdev_exit(void)
 
     del_gendisk(nupa_gendisk);
     put_disk(nupa_gendisk);
-	blk_mq_free_tag_set(&tag_set);
 #if LOCAL_RAMDISK_TEST
 	kfree(nupa_buf);
 #else
