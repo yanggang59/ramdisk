@@ -10,15 +10,15 @@
 #include <linux/hdreg.h>
 #include <asm/setup.h>
 
-#define DEBUG                                            1
-#define DEVICE_NAME                                      "BLOCKDEVRAM"
-#define RESERVER_MEM_START                               (0x758000000)
-#define RESERVER_MEM_SIZE                                (0x100000000)
-#define LOCAL_RAMDISK_TEST                               1
+#define DEBUG                                           1
+#define DEVICE_NAME                                     "BLOCKDEVRAM"
+#define RESERVE_MEM_START                               (0x100000000)
+#define RESERVE_MEM_SIZE                                (0x100000000)
+#define LOCAL_RAMDISK_TEST                              1
 #if LOCAL_RAMDISK_TEST
-#define NUPA_BLOCK_SIZE                                  (1024 * 1024)
+#define NUPA_BLOCK_SIZE                                 (1024 * 1024)
 #else
-#define NUPA_BLOCK_SIZE                                   RESERVER_MEM_SIZE
+#define NUPA_BLOCK_SIZE                                 RESERVE_MEM_SIZE
 #endif
 
 static DEFINE_SPINLOCK(nupa_lock);
@@ -142,7 +142,7 @@ static void print_buf(char* buf, int size)
 	PRINT("\n**********************************************************************\r\n");
 }
 
-static void simple_buf_test(void* buf, int size)
+static void simple_buf_test(void* buf, long size)
 {
 	if(size > NUPA_BLOCK_SIZE)
 		size = NUPA_BLOCK_SIZE;
@@ -159,7 +159,7 @@ static int __init blockdev_init(void)
 #if LOCAL_RAMDISK_TEST
 	nupa_buf = kmalloc(NUPA_BLOCK_SIZE, GFP_KERNEL);
 #else
-	nupa_buf = ioremap(RESERVER_MEM_START, RESERVER_MEM_SIZE);
+	nupa_buf = ioremap(RESERVE_MEM_START, RESERVE_MEM_SIZE);
 #endif
 #if DEBUG
 	simple_buf_test(nupa_buf, 1024 * 1024);
