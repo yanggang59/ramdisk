@@ -11,15 +11,19 @@
 #include <asm/setup.h>
 
 
-#define DEVICE_NAME                "BLOCKDEVRAM"
-#define RAM_BLOCK_SIZE             (1024 * 1024)  
+#define DEVICE_NAME                                      "BLOCKDEVRAM"
+#define RESERVER_MEM_START                               (0x758000000)
+#define RESERVER_MEM_SIZE                                (0x100000000)
+#define LOCAL_RAMDISK_TEST                               0
+#if LOCAL_RAMDISK_TEST
+#define RAM_BLOCK_SIZE                                   (1024 * 1024)
+#else
+#define RAM_BLOCK_SIZE                                   RESERVER_MEM_SIZE
+#endif
 
-static DEFINE_SPINLOCK(blockdevram_lock);
-
+static DEFINE_SPINLOCK(nupa_lock);
 static struct gendisk *blockdevram_gendisk;
-
 static char* ramdisk_buf;
-
 static int major;
 
 static void do_request(struct request *req)
@@ -48,11 +52,11 @@ static blk_status_t blockdev_queue_rq(struct blk_mq_hw_ctx *hctx,
 	req = bd->rq;
 	blk_mq_start_request(req);
 
-	spin_lock_irq(&blockdevram_lock);
+	spin_lock_irq(&nupa_lock);
 
 	do_request(req);
 
-	spin_unlock_irq(&blockdevram_lock);
+	spin_unlock_irq(&nupa_lock);
 	blk_mq_end_request(req, BLK_STS_OK);
 	return BLK_STS_OK;
 }
@@ -127,9 +131,11 @@ static int __init blockdev_init(void)
 	int ret;
 
 	major = register_blkdev(0, DEVICE_NAME);
-
+#if LOCAL_RAMDISK_TEST
 	ramdisk_buf = kmalloc(RAM_BLOCK_SIZE,GFP_KERNEL);
-
+#else
+	ramdisk_buf = ioremap(RESERVER_MEM_START, RESERVER_MEM_SIZE);
+#endif
 	tag_set.ops = &blockdev_mq_ops;
 	tag_set.nr_hw_queues = 1;
 	tag_set.nr_maps = 1;
@@ -161,7 +167,11 @@ static void __exit blockdev_exit(void)
     del_gendisk(blockdevram_gendisk);
     put_disk(blockdevram_gendisk);
 	blk_mq_free_tag_set(&tag_set);
+#if LOCAL_RAMDISK_TEST
 	kfree(ramdisk_buf);
+#else
+	iounmap(ramdisk_buf);
+#endif
 	return;
 }
 
