@@ -10,13 +10,13 @@
 #include <linux/hdreg.h>
 #include <asm/setup.h>
 
-
+#define DEBUG                                            1
 #define DEVICE_NAME                                      "BLOCKDEVRAM"
 #define RESERVER_MEM_START                               (0x758000000)
 #define RESERVER_MEM_SIZE                                (0x100000000)
-#define LOCAL_RAMDISK_TEST                               0
+#define LOCAL_RAMDISK_TEST                               1
 #if LOCAL_RAMDISK_TEST
-#define NUPA_BLOCK_SIZE                                   (1024 * 1024)
+#define NUPA_BLOCK_SIZE                                  (1024 * 1024)
 #else
 #define NUPA_BLOCK_SIZE                                   RESERVER_MEM_SIZE
 #endif
@@ -28,16 +28,16 @@ static int major;
 
 static void do_request(struct request *req)
 {	
-	unsigned long start = blk_rq_pos(req) << 9;  	/* blk_rq_pos获取到的是扇区地址，左移9位转换为字节地址 */
-	unsigned long len  = blk_rq_cur_bytes(req);		/* 大小   */
+	unsigned long start = blk_rq_pos(req) << 9;	
+	unsigned long len  = blk_rq_cur_bytes(req);
 
 	void *buffer = bio_data(req->bio);		
 	
 	if(rq_data_dir(req) == READ) {
-        printk("[Info] do_request read sector %d \r\n", start);
+        //printk("[Info] do_request read sector %ld \r\n", start);
 		memcpy(buffer, nupa_buf + start, len);
     } else if(rq_data_dir(req) == WRITE) {
-        printk("[Info] do_request write sector %d \r\n", start);
+        //printk("[Info] do_request write sector %ld \r\n", start);
         memcpy(nupa_buf + start, buffer, len);
     }
 
@@ -124,17 +124,47 @@ static int blockdevram_register_disk(void)
 	return err;
 }
 
+#if DEBUG
+#define PRINT printk
+static void print_buf(char* buf, int size)
+{
+	int i ,j;
+	PRINT("**********************************************************************\r\n");
+    PRINT("   ");
+	for(i = 0; i < 16; i++)
+		PRINT("%4X",i);
+    PRINT("\n======================================================================");
+	for(j = 0; j < size; j++) {
+		if(j % 16 == 0)
+			PRINT("\n%4X||",j);
+		PRINT("%4X",buf[j]);
+	}
+	PRINT("\n**********************************************************************\r\n");
+}
+
+static void simple_buf_test(void* buf, int size)
+{
+	if(size > NUPA_BLOCK_SIZE)
+		size = NUPA_BLOCK_SIZE;
+	memset(buf, 'A', size);
+	//print_buf(buf, size);
+}
+#endif
+
 static int __init blockdev_init(void)
 {
 	int ret;
 
 	major = register_blkdev(0, DEVICE_NAME);
 #if LOCAL_RAMDISK_TEST
-	nupa_buf = kmalloc(NUPA_BLOCK_SIZE,GFP_KERNEL);
+	nupa_buf = kmalloc(NUPA_BLOCK_SIZE, GFP_KERNEL);
 #else
 	nupa_buf = ioremap(RESERVER_MEM_START, RESERVER_MEM_SIZE);
 #endif
+#if DEBUG
+	simple_buf_test(nupa_buf, 1024 * 1024);
 	printk("[Info] nupa_buf = %p \r\n", nupa_buf);
+#endif	
 	tag_set.ops = &nupa_mq_ops;
 	tag_set.nr_hw_queues = 1;
 	tag_set.nr_maps = 1;
