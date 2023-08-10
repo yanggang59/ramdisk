@@ -8,7 +8,9 @@
 #include <linux/slab.h>
 #include <linux/pgtable.h>
 #include <linux/hdreg.h>
-#include <asm/setup.h>
+#include <linux/uio_driver.h>
+#include <linux/device.h>
+
 
 #define DEBUG                                           1
 #define DEVICE_NAME                                     "BLOCKDEVRAM"
@@ -23,9 +25,14 @@
 #define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
 #define SECTORS_PER_PAGE	(1 << SECTORS_PER_PAGE_SHIFT)
 
-static struct gendisk *nupa_gendisk;
-static void* nupa_buf;
-static int major;
+struct nupa_dev {
+	struct device dev; 
+	struct gendisk *nupa_gendisk;
+	void* nupa_buf;
+	int major;
+};
+
+static struct nupa_dev* g_nupa_dev;
 
 static int nupa_fops_open(struct block_device *bdev, fmode_t mode)
 {
@@ -68,9 +75,9 @@ static blk_qc_t nupa_fops_submit_bio(struct bio *bio)
 		void* dst = kmap(page);
 		offset = bvec.bv_offset;
 		if (bio_op(bio) == REQ_OP_READ) {
-			memcpy(dst + offset, nupa_buf + start, len);
+			memcpy(dst + offset, g_nupa_dev->nupa_buf + start, len);
 		} else if (bio_op(bio) == REQ_OP_WRITE) {
-			memcpy(nupa_buf + start, dst + offset, len);
+			memcpy(g_nupa_dev->nupa_buf + start, dst + offset, len);
 		}
 		start += len;
 		kunmap(page);
@@ -89,7 +96,7 @@ static const struct block_device_operations nupa_fops = {
 	.submit_bio = nupa_fops_submit_bio,
 };
 
-static int nupa_register_disk(void)
+static int nupa_register_disk(struct nupa_dev* nupa_dev)
 {
 	struct gendisk *disk;
 	int err;
@@ -98,14 +105,14 @@ static int nupa_register_disk(void)
 	if (IS_ERR(disk))
 		return PTR_ERR(disk);
 
-	disk->major = major;
+	disk->major = g_nupa_dev->major;
 	disk->first_minor = 0;
 	disk->minors = 1;
 	disk->fops = &nupa_fops;
 
 	sprintf(disk->disk_name, "nupa");
 
-	nupa_gendisk = disk;
+	nupa_dev->nupa_gendisk = disk;
 	err = add_disk(disk);
 	if (err)
 		put_disk(disk);
@@ -114,23 +121,6 @@ static int nupa_register_disk(void)
 }
 
 #if DEBUG
-#define PRINT printk
-static void print_buf(char* buf, int size)
-{
-	int i ,j;
-	PRINT("**********************************************************************\r\n");
-    PRINT("   ");
-	for(i = 0; i < 16; i++)
-		PRINT("%4X",i);
-    PRINT("\n======================================================================");
-	for(j = 0; j < size; j++) {
-		if(j % 16 == 0)
-			PRINT("\n%4X||",j);
-		PRINT("%4X",buf[j]);
-	}
-	PRINT("\n**********************************************************************\r\n");
-}
-
 static void simple_buf_test(void* buf, long size)
 {
 	if(size > NUPA_BLOCK_SIZE)
@@ -139,25 +129,44 @@ static void simple_buf_test(void* buf, long size)
 }
 #endif
 
+int create_nupa_uio_chr_dev(struct device *dev, phys_addr_t phya, resource_size_t size, unsigned long offs)
+{
+	struct uio_info *info;
+	info = devm_kzalloc(dev, sizeof(struct uio_info), GFP_KERNEL);
+
+	info->name = "nupa uio";
+	info->version = "0.0.1";
+	
+	info->mem->memtype = UIO_MEM_PHYS;
+	info->mem->addr = phya;
+	info->mem->size = size;
+	info->mem->offs = offs;
+	return devm_uio_register_device(dev, info);
+}
+
 static int __init blockdev_init(void)
 {
 	int ret;
-
-	major = register_blkdev(0, DEVICE_NAME);
+	g_nupa_dev = kmalloc(sizeof(struct nupa_dev), GFP_KERNEL);
+	if(!g_nupa_dev) {
+		printk("[Error] Create nupa_dev failed \r\n");
+		goto out;
+	}
+	g_nupa_dev->major = register_blkdev(0, DEVICE_NAME);
 #if LOCAL_RAMDISK_TEST
-	nupa_buf = kmalloc(NUPA_BLOCK_SIZE, GFP_KERNEL);
+	g_nupa_dev->nupa_buf = kmalloc(NUPA_BLOCK_SIZE, GFP_KERNEL);
 #else
-	nupa_buf = ioremap(RESERVE_MEM_START, RESERVE_MEM_SIZE);
+	g_nupa_dev->nupa_buf = ioremap(RESERVE_MEM_START, RESERVE_MEM_SIZE);
 #endif
 #if DEBUG
-	simple_buf_test(nupa_buf, 1024 * 1024);
-	printk("[Info] nupa_buf = %p \r\n", nupa_buf);
+	simple_buf_test(g_nupa_dev->nupa_buf, 1024 * 1024);
+	printk("[Info] nupa_buf = %p \r\n", g_nupa_dev->nupa_buf);
 #endif	
-    ret = nupa_register_disk();
+    ret = nupa_register_disk(g_nupa_dev);
     if (ret) {
 		goto out;
 	}
-        
+    //create_nupa_uio_chr_dev(&g_nupa_dev->dev, (phys_addr_t)g_nupa_dev->nupa_buf, RESERVE_MEM_SIZE, 0);
 	return 0;
 
 out:
@@ -166,15 +175,16 @@ out:
 
 static void __exit blockdev_exit(void)
 {
-	unregister_blkdev(major, DEVICE_NAME);
+	unregister_blkdev(g_nupa_dev->major, DEVICE_NAME);
 
-    del_gendisk(nupa_gendisk);
-    put_disk(nupa_gendisk);
+    del_gendisk(g_nupa_dev->nupa_gendisk);
+    put_disk(g_nupa_dev->nupa_gendisk);
 #if LOCAL_RAMDISK_TEST
-	kfree(nupa_buf);
+	kfree(g_nupa_dev->nupa_buf);
 #else
-	iounmap(nupa_buf);
+	iounmap(g_nupa_dev->nupa_buf);
 #endif
+	kfree(g_nupa_dev);
 	return;
 }
 
