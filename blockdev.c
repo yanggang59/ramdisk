@@ -109,7 +109,7 @@ static int blockdevram_register_disk(void)
 	disk->major = major;
 	disk->first_minor = 0;
 	disk->minors = 1;
-	disk->flags |= GENHD_FL_NO_PART;
+	//disk->flags |= GENHD_FL_NO_PART_SCAN;
 	disk->fops = &blockdev_fops;
 
 	sprintf(disk->disk_name, "blockdevram");
