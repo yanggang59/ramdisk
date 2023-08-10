@@ -16,14 +16,14 @@
 #define RESERVER_MEM_SIZE                                (0x100000000)
 #define LOCAL_RAMDISK_TEST                               0
 #if LOCAL_RAMDISK_TEST
-#define RAM_BLOCK_SIZE                                   (1024 * 1024)
+#define NUPA_BLOCK_SIZE                                   (1024 * 1024)
 #else
-#define RAM_BLOCK_SIZE                                   RESERVER_MEM_SIZE
+#define NUPA_BLOCK_SIZE                                   RESERVER_MEM_SIZE
 #endif
 
 static DEFINE_SPINLOCK(nupa_lock);
-static struct gendisk *blockdevram_gendisk;
-static char* ramdisk_buf;
+static struct gendisk *nupa_gendisk;
+static char* nupa_buf;
 static int major;
 
 static void do_request(struct request *req)
@@ -36,16 +36,16 @@ static void do_request(struct request *req)
 	void *buffer = bio_data(req->bio);		
 	
 	if(rq_data_dir(req) == READ) {
-        printk("[Info] do_ramdisk_request read %d \r\n", ++r_cnt);
-		memcpy(buffer, ramdisk_buf + start, len);
+        printk("[Info] do_request read %d \r\n", ++r_cnt);
+		memcpy(buffer, nupa_buf + start, len);
     } else if(rq_data_dir(req) == WRITE) {
-        printk("[Info] do_ramdisk_request write %d \r\n", ++w_cnt);
-        memcpy(ramdisk_buf + start, buffer, len);
+        printk("[Info] do_request write %d \r\n", ++w_cnt);
+        memcpy(nupa_buf + start, buffer, len);
     }
 
 }
 
-static blk_status_t blockdev_queue_rq(struct blk_mq_hw_ctx *hctx,
+static blk_status_t nupa_queue_rq(struct blk_mq_hw_ctx *hctx,
 				const struct blk_mq_queue_data *bd)
 {
 	struct request *req;
@@ -61,44 +61,44 @@ static blk_status_t blockdev_queue_rq(struct blk_mq_hw_ctx *hctx,
 	return BLK_STS_OK;
 }
 
-static int blockdev_open(struct block_device *bdev, fmode_t mode)
+static int nupa_fops_open(struct block_device *bdev, fmode_t mode)
 {
-	printk("[Info] blockdev_open \r\n");
+	printk("[Info] nupa_open \r\n");
 	return 0;
 }
 
-static void blockdev_release(struct gendisk *disk, fmode_t mode)
+static void nupa_fops_release(struct gendisk *disk, fmode_t mode)
 {
 	return ;
 }
 
-int blockdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd, unsigned long arg)
+static int nupa_fops_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd, unsigned long arg)
 {
     printk("[Info] ioctl cmd 0x%08x\n", cmd);
 
     return -ENOTTY;
 }
 
-static int blockdev_getgeo(struct block_device *bdev, struct hd_geometry *geo)
+static int nupa_fops_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 {
 	geo->heads = 2;
 	geo->cylinders = 32;
-	geo->sectors = (RAM_BLOCK_SIZE / geo->heads / geo->cylinders);
+	geo->sectors = (NUPA_BLOCK_SIZE / geo->heads / geo->cylinders);
 	return 0;
 }
 
-static const struct block_device_operations blockdev_fops = {
+static const struct block_device_operations nupa_fops = {
 	.owner = THIS_MODULE,
-	.open = blockdev_open,
-	.release = blockdev_release,
-	.ioctl = blockdev_ioctl,
-	.getgeo = blockdev_getgeo,
+	.open = nupa_fops_open,
+	.release = nupa_fops_release,
+	.ioctl = nupa_fops_ioctl,
+	.getgeo = nupa_fops_getgeo,
 };
 
 static struct blk_mq_tag_set tag_set;
 
-static const struct blk_mq_ops blockdev_mq_ops = {
-	.queue_rq = blockdev_queue_rq,
+static const struct blk_mq_ops nupa_mq_ops = {
+	.queue_rq = nupa_queue_rq,
 };
 
 static int blockdevram_register_disk(void)
@@ -114,15 +114,15 @@ static int blockdevram_register_disk(void)
 	disk->first_minor = 0;
 	disk->minors = 1;
 	//disk->flags |= GENHD_FL_NO_PART_SCAN;
-	disk->fops = &blockdev_fops;
+	disk->fops = &nupa_fops;
 
-	sprintf(disk->disk_name, "blockdevram");
+	sprintf(disk->disk_name, "nupa");
 
-	blockdevram_gendisk = disk;
+	nupa_gendisk = disk;
 	err = add_disk(disk);
 	if (err)
 		put_disk(disk);
-	set_capacity(disk, (RAM_BLOCK_SIZE >> 9));
+	set_capacity(disk, (NUPA_BLOCK_SIZE >> 9));
 	return err;
 }
 
@@ -132,11 +132,11 @@ static int __init blockdev_init(void)
 
 	major = register_blkdev(0, DEVICE_NAME);
 #if LOCAL_RAMDISK_TEST
-	ramdisk_buf = kmalloc(RAM_BLOCK_SIZE,GFP_KERNEL);
+	nupa_buf = kmalloc(NUPA_BLOCK_SIZE,GFP_KERNEL);
 #else
-	ramdisk_buf = ioremap(RESERVER_MEM_START, RESERVER_MEM_SIZE);
+	nupa_buf = ioremap(RESERVER_MEM_START, RESERVER_MEM_SIZE);
 #endif
-	tag_set.ops = &blockdev_mq_ops;
+	tag_set.ops = &nupa_mq_ops;
 	tag_set.nr_hw_queues = 1;
 	tag_set.nr_maps = 1;
 	tag_set.queue_depth = 16;
@@ -164,13 +164,13 @@ static void __exit blockdev_exit(void)
 {
 	unregister_blkdev(major, DEVICE_NAME);
 
-    del_gendisk(blockdevram_gendisk);
-    put_disk(blockdevram_gendisk);
+    del_gendisk(nupa_gendisk);
+    put_disk(nupa_gendisk);
 	blk_mq_free_tag_set(&tag_set);
 #if LOCAL_RAMDISK_TEST
-	kfree(ramdisk_buf);
+	kfree(nupa_buf);
 #else
-	iounmap(ramdisk_buf);
+	iounmap(nupa_buf);
 #endif
 	return;
 }

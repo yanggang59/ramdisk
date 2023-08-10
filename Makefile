@@ -6,4 +6,4 @@ all:
 %:
 	make -C $(KSRC)/ M=$(CURDIR) $@
 
-obj-m +=blockdev.o
+obj-m +=nupa.o
