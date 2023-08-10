@@ -14,7 +14,7 @@
 #define DEVICE_NAME                                     "BLOCKDEVRAM"
 #define RESERVE_MEM_START                               (0x100000000)
 #define RESERVE_MEM_SIZE                                (0x100000000)
-#define LOCAL_RAMDISK_TEST                              1
+#define LOCAL_RAMDISK_TEST                              0
 #if LOCAL_RAMDISK_TEST
 #define NUPA_BLOCK_SIZE                                 (1024 * 1024)
 #else
@@ -53,7 +53,7 @@ static int nupa_fops_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 	return 0;
 }
 
-static void nupa_fops_submit_bio(struct bio *bio)
+static blk_qc_t nupa_fops_submit_bio(struct bio *bio)
 {
 	int offset;
 	long start;
@@ -76,7 +76,9 @@ static void nupa_fops_submit_bio(struct bio *bio)
 		kunmap(page);
 	}
 	bio_endio(bio);
+	return BLK_QC_T_NONE;
 }
+
 
 static const struct block_device_operations nupa_fops = {
 	.owner = THIS_MODULE,
