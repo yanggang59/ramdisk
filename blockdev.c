@@ -7,10 +7,11 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/pgtable.h>
+#include <linux/hdreg.h>
 #include <asm/setup.h>
 
+
 #define DEVICE_NAME                "BLOCKDEVRAM"
-#define BLOCKDEVRAM_MAJOR          250
 #define RAM_BLOCK_SIZE             (1024 * 1024)  
 
 static DEFINE_SPINLOCK(blockdevram_lock);
@@ -18,6 +19,8 @@ static DEFINE_SPINLOCK(blockdevram_lock);
 static struct gendisk *blockdevram_gendisk;
 
 static char* ramdisk_buf;
+
+static int major;
 
 static void do_request(struct request *req)
 {	
@@ -41,7 +44,8 @@ static void do_request(struct request *req)
 static blk_status_t blockdev_queue_rq(struct blk_mq_hw_ctx *hctx,
 				const struct blk_mq_queue_data *bd)
 {
-	struct request *req = bd->rq;
+	struct request *req;
+	req = bd->rq;
 	blk_mq_start_request(req);
 
 	spin_lock_irq(&blockdevram_lock);
@@ -55,6 +59,7 @@ static blk_status_t blockdev_queue_rq(struct blk_mq_hw_ctx *hctx,
 
 static int blockdev_open(struct block_device *bdev, fmode_t mode)
 {
+	printk("[Info] blockdev_open \r\n");
 	return 0;
 }
 
@@ -63,10 +68,27 @@ static void blockdev_release(struct gendisk *disk, fmode_t mode)
 	return ;
 }
 
+int blockdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd, unsigned long arg)
+{
+    printk("[Info] ioctl cmd 0x%08x\n", cmd);
+
+    return -ENOTTY;
+}
+
+static int blockdev_getgeo(struct block_device *bdev, struct hd_geometry *geo)
+{
+	geo->heads = 2;
+	geo->cylinders = 32;
+	geo->sectors = (RAM_BLOCK_SIZE / geo->heads / geo->cylinders);
+	return 0;
+}
+
 static const struct block_device_operations blockdev_fops = {
 	.owner = THIS_MODULE,
 	.open = blockdev_open,
 	.release = blockdev_release,
+	.ioctl = blockdev_ioctl,
+	.getgeo = blockdev_getgeo,
 };
 
 static struct blk_mq_tag_set tag_set;
@@ -84,7 +106,7 @@ static int blockdevram_register_disk(void)
 	if (IS_ERR(disk))
 		return PTR_ERR(disk);
 
-	disk->major = BLOCKDEVRAM_MAJOR;
+	disk->major = major;
 	disk->first_minor = 0;
 	disk->minors = 1;
 	disk->flags |= GENHD_FL_NO_PART;
@@ -104,8 +126,7 @@ static int __init blockdev_init(void)
 {
 	int ret;
 
-	if (register_blkdev(BLOCKDEVRAM_MAJOR, DEVICE_NAME))
-		return -EBUSY;
+	major = register_blkdev(0, DEVICE_NAME);
 
 	ramdisk_buf = kmalloc(RAM_BLOCK_SIZE,GFP_KERNEL);
 
@@ -129,18 +150,17 @@ static int __init blockdev_init(void)
 out_free_tagset:
 	blk_mq_free_tag_set(&tag_set);
 out_unregister_blkdev:
-	unregister_blkdev(BLOCKDEVRAM_MAJOR, DEVICE_NAME);
+	unregister_blkdev(major, DEVICE_NAME);
 	return ret;
 }
 
 static void __exit blockdev_exit(void)
 {
-	unregister_blkdev(BLOCKDEVRAM_MAJOR, DEVICE_NAME);
+	unregister_blkdev(major, DEVICE_NAME);
 
     del_gendisk(blockdevram_gendisk);
     put_disk(blockdevram_gendisk);
 	blk_mq_free_tag_set(&tag_set);
-
 	return;
 }
 
