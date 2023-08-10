@@ -23,7 +23,7 @@
 
 static DEFINE_SPINLOCK(nupa_lock);
 static struct gendisk *nupa_gendisk;
-static char* nupa_buf;
+static void* nupa_buf;
 static int major;
 
 static void do_request(struct request *req)
@@ -31,15 +31,13 @@ static void do_request(struct request *req)
 	unsigned long start = blk_rq_pos(req) << 9;  	/* blk_rq_pos获取到的是扇区地址，左移9位转换为字节地址 */
 	unsigned long len  = blk_rq_cur_bytes(req);		/* 大小   */
 
-    static int w_cnt = 0;
-    static int r_cnt = 0;
 	void *buffer = bio_data(req->bio);		
 	
 	if(rq_data_dir(req) == READ) {
-        printk("[Info] do_request read %d \r\n", ++r_cnt);
+        printk("[Info] do_request read sector %d \r\n", start);
 		memcpy(buffer, nupa_buf + start, len);
     } else if(rq_data_dir(req) == WRITE) {
-        printk("[Info] do_request write %d \r\n", ++w_cnt);
+        printk("[Info] do_request write sector %d \r\n", start);
         memcpy(nupa_buf + start, buffer, len);
     }
 
@@ -136,6 +134,7 @@ static int __init blockdev_init(void)
 #else
 	nupa_buf = ioremap(RESERVER_MEM_START, RESERVER_MEM_SIZE);
 #endif
+	printk("[Info] nupa_buf = %p \r\n", nupa_buf);
 	tag_set.ops = &nupa_mq_ops;
 	tag_set.nr_hw_queues = 1;
 	tag_set.nr_maps = 1;
