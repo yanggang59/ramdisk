@@ -23,11 +23,11 @@
 #define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
 #define SECTORS_PER_PAGE	(1 << SECTORS_PER_PAGE_SHIFT)
 
-static DEFINE_SPINLOCK(nupa_lock);
 static struct gendisk *nupa_gendisk;
 static void* nupa_buf;
 static int major;
 
+<<<<<<< HEAD
 static void do_request(struct request *req)
 {	
 #if 1
@@ -94,6 +94,8 @@ static blk_status_t nupa_queue_rq(struct blk_mq_hw_ctx *hctx,
 	return BLK_STS_OK;
 }
 
+=======
+>>>>>>> 26ff2e8 (modify submit bio functioni and remove useless code)
 static int nupa_fops_open(struct block_device *bdev, fmode_t mode)
 {
 	printk("[Info] nupa_open \r\n");
@@ -201,7 +203,6 @@ static void simple_buf_test(void* buf, long size)
 	if(size > NUPA_BLOCK_SIZE)
 		size = NUPA_BLOCK_SIZE;
 	memset(buf, 'A', size);
-	//print_buf(buf, size);
 }
 #endif
 
