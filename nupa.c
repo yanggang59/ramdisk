@@ -24,8 +24,8 @@ struct uio_info nupa_uio_info = {
 static int nupa_uio_probe(struct platform_device *pdev) {
   struct device *dev = &pdev->dev;
   nupa_uio_info.mem[0].name = "area1";
-  nupa_uio_info.mem[0].addr = (unsigned long)g_nupa_dev->nupa_buf;
-  nupa_uio_info.mem[0].memtype = UIO_MEM_LOGICAL;
+  nupa_uio_info.mem[0].addr = RESERVE_MEM_START;//(unsigned long)g_nupa_dev->nupa_buf;
+  nupa_uio_info.mem[0].memtype = UIO_MEM_PHYS;
   nupa_uio_info.mem[0].size = NUPA_BLOCK_SIZE;
   return uio_register_device(dev, &nupa_uio_info);
 }
