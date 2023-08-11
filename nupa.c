@@ -10,27 +10,7 @@
 #include <linux/hdreg.h>
 #include <linux/uio_driver.h>
 #include <linux/device.h>
-
-
-#define DEBUG                                           1
-#define DEVICE_NAME                                     "BLOCKDEVRAM"
-#define RESERVE_MEM_START                               (0x100000000)
-#define RESERVE_MEM_SIZE                                (0x100000000)
-#define LOCAL_RAMDISK_TEST                              0
-#if LOCAL_RAMDISK_TEST
-#define NUPA_BLOCK_SIZE                                 (1024 * 1024)
-#else
-#define NUPA_BLOCK_SIZE                                 RESERVE_MEM_SIZE
-#endif
-#define SECTORS_PER_PAGE_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
-#define SECTORS_PER_PAGE	(1 << SECTORS_PER_PAGE_SHIFT)
-
-struct nupa_dev {
-	struct device dev; 
-	struct gendisk *nupa_gendisk;
-	void* nupa_buf;
-	int major;
-};
+#include "nupa.h"
 
 static struct nupa_dev* g_nupa_dev;
 
@@ -129,21 +109,6 @@ static void simple_buf_test(void* buf, long size)
 }
 #endif
 
-int create_nupa_uio_chr_dev(struct device *dev, phys_addr_t phya, resource_size_t size, unsigned long offs)
-{
-	struct uio_info *info;
-	info = devm_kzalloc(dev, sizeof(struct uio_info), GFP_KERNEL);
-
-	info->name = "nupa uio";
-	info->version = "0.0.1";
-	
-	info->mem->memtype = UIO_MEM_PHYS;
-	info->mem->addr = phya;
-	info->mem->size = size;
-	info->mem->offs = offs;
-	return devm_uio_register_device(dev, info);
-}
-
 static int __init blockdev_init(void)
 {
 	int ret;
@@ -166,7 +131,7 @@ static int __init blockdev_init(void)
     if (ret) {
 		goto out;
 	}
-    //create_nupa_uio_chr_dev(&g_nupa_dev->dev, (phys_addr_t)g_nupa_dev->nupa_buf, RESERVE_MEM_SIZE, 0);
+
 	return 0;
 
 out:
@@ -176,7 +141,6 @@ out:
 static void __exit blockdev_exit(void)
 {
 	unregister_blkdev(g_nupa_dev->major, DEVICE_NAME);
-
     del_gendisk(g_nupa_dev->nupa_gendisk);
     put_disk(g_nupa_dev->nupa_gendisk);
 #if LOCAL_RAMDISK_TEST
