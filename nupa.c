@@ -10,9 +10,53 @@
 #include <linux/hdreg.h>
 #include <linux/uio_driver.h>
 #include <linux/device.h>
+#include <linux/platform_device.h>
 #include "nupa.h"
 
 static struct nupa_dev* g_nupa_dev;
+
+struct uio_info nupa_uio_info = {
+    .name = "nupa_uio",
+    .version = "1.0",
+    .irq = UIO_IRQ_NONE,
+};
+
+static int nupa_uio_probe(struct platform_device *pdev) {
+  struct device *dev = &pdev->dev;
+  nupa_uio_info.mem[0].name = "area1";
+  nupa_uio_info.mem[0].addr = (unsigned long)g_nupa_dev->nupa_buf;
+  nupa_uio_info.mem[0].memtype = UIO_MEM_LOGICAL;
+  nupa_uio_info.mem[0].size = NUPA_BLOCK_SIZE;
+  return uio_register_device(dev, &nupa_uio_info);
+}
+
+static int nupa_uio_remove(struct platform_device *pdev) 
+{
+	printk("[Info] nupa_uio_remove\r\n");
+	uio_unregister_device(&nupa_uio_info);
+	return 0;
+}
+static struct platform_device *nupa_uio_device;
+static struct platform_driver nupa_uio_driver = {
+    .driver =
+        {
+            .name = "nupa_uio",
+        },
+    .probe = nupa_uio_probe,
+    .remove = nupa_uio_remove,
+};
+
+static int nupa_uio_init(void) 
+{
+  nupa_uio_device = platform_device_register_simple("nupa_uio", -1, NULL, 0);
+  return platform_driver_register(&nupa_uio_driver);
+}
+
+static void nupa_uio_exit(void) 
+{
+  platform_device_unregister(nupa_uio_device);
+  platform_driver_unregister(&nupa_uio_driver);
+}
 
 static int nupa_fops_open(struct block_device *bdev, fmode_t mode)
 {
@@ -28,7 +72,6 @@ static void nupa_fops_release(struct gendisk *disk, fmode_t mode)
 static int nupa_fops_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd, unsigned long arg)
 {
     printk("[Info] ioctl cmd 0x%08x\n", cmd);
-
     return -ENOTTY;
 }
 
@@ -131,9 +174,8 @@ static int __init blockdev_init(void)
     if (ret) {
 		goto out;
 	}
-
+	nupa_uio_init();
 	return 0;
-
 out:
 	return ret;
 }
@@ -149,6 +191,7 @@ static void __exit blockdev_exit(void)
 	iounmap(g_nupa_dev->nupa_buf);
 #endif
 	kfree(g_nupa_dev);
+	nupa_uio_exit();
 	return;
 }
 

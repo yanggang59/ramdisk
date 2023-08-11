@@ -1,7 +1,7 @@
 #ifndef __NUPA_H_
 #define __NUPA_H_
 #define DEBUG                                           1
-#define DEVICE_NAME                                     "BLOCKDEVRAM"
+#define DEVICE_NAME                                     "nupa"
 #define RESERVE_MEM_START                               (0x100000000)
 #define RESERVE_MEM_SIZE                                (0x100000000)
 #define LOCAL_RAMDISK_TEST                              0
