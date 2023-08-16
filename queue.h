@@ -61,9 +61,13 @@ static int qpush(struct queue *qbase, void *val)
 	if (qfull(head, tail, size)) {
 		return -1;
 	}
-
+#ifndef USER_APP
+	printk("assign_to In \r\n");
+#endif
 	qbase->assign_to(qbase, head_ = head, val);
-
+#ifndef USER_APP
+	printk("assign_to Out \r\n");
+#endif
 	head = (head + 1) & (size - 1);
 	set_queue_head(qbase, head);
 

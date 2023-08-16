@@ -11,8 +11,8 @@
 #include <linux/uio_driver.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
+#include "nupa_driver.h"
 #include "nupa.h"
-#include "queue.h"
 
 static struct nupa_dev* g_nupa_dev;
 struct nupa_meta_info_header* g_meta_info_header;
@@ -24,79 +24,6 @@ struct uio_info nupa_uio_info = {
     .version = "1.0",
     .irq = UIO_IRQ_NONE,
 };
-
-static void sub_queue_assign_to(struct queue *qbase, int head, void *entry)
-{
-	memcpy(&g_nupa_sub_queue->entries[head], entry, sizeof(struct nupa_queue_entry));
-}
-
-static void sub_queue_assign_from(struct queue *qbase, int tail, void *entry)
-{
-	memcpy(entry, &g_nupa_sub_queue->entries[tail], sizeof(struct nupa_queue_entry));
-}
-
-static void com_queue_assign_to(struct queue *qbase, int head, void *entry)
-{
-	memcpy(&g_nupa_com_queue->entries[head], entry, sizeof(struct nupa_queue_entry));
-}
-
-static void com_queue_assign_from(struct queue *qbase, int tail, void *entry)
-{
-	memcpy(entry, &g_nupa_com_queue->entries[tail], sizeof(struct nupa_queue_entry));
-}
-
-/**
-*                                 meta_data               entries                      entries
-*       --------------------------------------------------------------------------------------------------------
-*       |                             |        |           |      |      |      |         |      |      |
-*       |         DATA                | header | sub queue |  x   |   x  |  ... |com queue|  x   |  x   | ...
-*       |                             |        |           |      |      |      |         |      |      |
-*       --------------------------------------------------------------------------------------------------------
-*/
-
-static void nupa_meta_data_init(void)
-{
-	g_meta_info_header = (struct nupa_meta_info_header*)(g_nupa_dev->nupa_buf + NUPA_DATA_SIZE);
-	memset(g_meta_info_header, 0, sizeof(struct nupa_meta_info_header));
-	memset(g_meta_info_header->vb, 0xFF, sizeof(g_meta_info_header->vb));
-
-	g_nupa_sub_queue = (struct queue *)((char*)g_meta_info_header + sizeof(struct nupa_meta_info_header));
-	memset(g_nupa_sub_queue, 0, sizeof(struct queue));
-	g_nupa_sub_queue->size = QUEUE_SIZE;
-	g_nupa_sub_queue->entries = (struct nupa_queue_entry*) ((char*)g_nupa_sub_queue + sizeof(struct queue));
-	g_nupa_sub_queue->assign_to = sub_queue_assign_to;
-	g_nupa_sub_queue->assign_from = sub_queue_assign_from;
-
-	g_nupa_com_queue = (struct queue *)((char*)g_nupa_sub_queue + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
-	memset(g_nupa_com_queue, 0, sizeof(struct queue));
-	g_nupa_com_queue->size = QUEUE_SIZE;
-	g_nupa_com_queue->entries = (struct nupa_queue_entry*)((char*)g_nupa_com_queue + sizeof(struct queue));
-	g_nupa_com_queue->assign_to = com_queue_assign_to;
-	g_nupa_com_queue->assign_from = com_queue_assign_from;
-	return;
-}
-
-bool is_vb_dirty(unsigned long vb, unsigned long* dirty_bit_map)
-{
-	unsigned long byte = vb / sizeof(unsigned long);
-	unsigned long offset = vb % sizeof(unsigned long);
-	unsigned value = dirty_bit_map[byte];
-	return (value & (1 << offset));
-}
-
-void set_vb_dirty(unsigned long vb, unsigned long* dirty_bit_map)
-{
-	unsigned long byte = vb / sizeof(unsigned long);
-	unsigned long offset = vb % sizeof(unsigned long);
-	dirty_bit_map[byte] |= 1 << offset;
-}
-
-void clr_vb_dirty(unsigned long vb, unsigned long* dirty_bit_map)
-{
-	unsigned long byte = vb / sizeof(unsigned long);
-	unsigned long offset = vb % sizeof(unsigned long);
-	dirty_bit_map[byte] &= ~(1 << offset);
-}
 
 
 static int nupa_uio_probe(struct platform_device *pdev) {
@@ -161,6 +88,36 @@ static int nupa_fops_getgeo(struct block_device *bdev, struct hd_geometry *geo)
 	return 0;
 }
 
+static void sync_read(unsigned long pb)
+{
+	struct nupa_queue_entry tmp_entry = {
+		.pb = pb,
+		.req = REQ_READ,
+	};
+	//push into sub queue
+	while(qpush(g_nupa_sub_queue, &tmp_entry));
+	
+	//get result from com queue
+	while((qpop(g_nupa_com_queue, &tmp_entry)) && (tmp_entry.pb == pb) && (tmp_entry.req == REQ_READ));
+}
+
+
+static void async_write(unsigned long pb)
+{
+	struct nupa_queue_entry tmp_entry = {
+		.pb = pb,
+		.req = REQ_WRITE,
+	};
+	//push into sub queue
+#ifndef USER_APP
+	printk("async_write In \r\n");
+#endif
+	while(qpush(g_nupa_sub_queue, &tmp_entry));
+#ifndef USER_APP
+	printk("async_write Out \r\n");
+#endif
+}
+
 /**
 * for read
 * 1. if vb is invalid or vb is not equal to pb, read frome remote
@@ -189,10 +146,7 @@ static void nupa_process_read(void* u_buf, void* k_buf, unsigned long start, str
 			*  2. set pb
 			*  3. do local copy
 			*/
-			/**
-			* TODO: sync read pb from remote
-			*/
-
+			sync_read(pb);
 			g_meta_info_header->vb[vb] = pb;
 		} else if(g_meta_info_header->vb[vb] != pb) {
 			/**
@@ -201,10 +155,7 @@ static void nupa_process_read(void* u_buf, void* k_buf, unsigned long start, str
 			*  3. if clean, sync read from remote, set pb, then do local copy  
 			*/
 			while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map));
-			/**
-			* TODO: sync read pb from remote
-			*/
-
+			sync_read(pb);
 			g_meta_info_header->vb[vb] = pb;
 		}else if(g_meta_info_header->vb[vb] == pb) {
 			/**
@@ -214,7 +165,7 @@ static void nupa_process_read(void* u_buf, void* k_buf, unsigned long start, str
 			printk("[Read] local cache hit\r\n");
 		}
 
-		memcpy(u_buf + offset, k_buf + start, size);
+		memcpy(u_buf + offset, k_buf + addr, size);
 
 		start += size;
 		offset += size;
@@ -237,6 +188,7 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
 	unsigned long pb , vb, addr, size;
 	unsigned long len  = bvec->bv_len;
 	unsigned long offset = bvec->bv_offset;
+	printk("[Info] nupa_process_write In , start = %lu, len = %lu , offset = %lu\r\n",start, len, offset);
 	while(len) {
 		pb = start / NUPA_BLOCK_SIZE;
         vb = pb % CACHE_BLOCK_NUM;
@@ -244,52 +196,50 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
 		size = NUPA_BLOCK_SIZE - addr;
 		if (len < size)
 			size = len;
-
+		
+		printk("[Info] nupa_process_write pb = %lu \r\n", pb);
         if((g_meta_info_header->vb[vb] == INVALID_ADDR)) {
 			/** This vb is new 
 			* 1. write to local ,set pb and set dirty bit 
-			* 2. send to process queue
+			* 2. async write to remote
 			*/
-			printk("[Info] write to local\r\n");
-			memcpy(k_buf + start, u_buf + offset, len);
-			/** 
-			* TODO: send to process queue
-			*/
+			printk("[Info] newly written \r\n");
+			memcpy(k_buf + addr, u_buf + offset, size);
+			printk("[Info] mem copy done  \r\n");
 			set_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
+			printk("[Info] mark dirty done  \r\n");
 			g_meta_info_header->vb[vb] = pb;
-
+			printk("[Info] replace cache done  \r\n");
+			async_write(pb);
+			printk("[Info] async write done  \r\n");
 		} else if(g_meta_info_header->vb[vb] != pb) {
 			/**  
 			* 1. check dirty bit
 			* 2. if clean, direct write
 			* 3. if dirty, wait till dirty bit is clean, then read from remote
 			* 4. write to local , set pb and set dirty bit
-			* 5. send to process queue
+			* 5. async write to remote
 			*/
 			// if vb is dirty, wait till app flush dirty block into remote and clean dirty bit
+			printk("[Info] cache miss \r\n");
 			while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map)); 
-			memcpy(k_buf + start, u_buf + offset, len);
+			memcpy(k_buf + addr, u_buf + offset, size);
 			set_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
 			g_meta_info_header->vb[vb] = pb;
-			/**
-			* TODO: send to process queue
-			*/
-
-
+			async_write(pb);
 		} else if(g_meta_info_header->vb[vb] == pb) {
 			/** 
 			* 1. check dirty bit
 			* 2. if clean, direct write
 			* 3. if dirty, wait till dirty bit is clean
 			* 4. write to local , set pb and set dirty bit
-			* 5. send to process queue
+			* 5. async write to remote
 			*/
+			printk("[Info] rewrite \r\n");
 			while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map)); 
-			memcpy(k_buf + start, u_buf + offset, len);
+			memcpy(k_buf + addr, u_buf + offset, len);
 			set_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
-			/**
-			* TODO: send to process queue
-			*/
+			async_write(pb);
 		} 
         start += size;
 		offset += size;
@@ -297,6 +247,7 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
 		u_buf += size;
         len -= size;
 	}
+	printk("[Info] nupa_process_write Out \r\n");
 }
 
 static blk_qc_t nupa_fops_submit_bio(struct bio *bio)
@@ -398,7 +349,9 @@ static int __init blockdev_init(void)
     if (ret) {
 		goto out;
 	}
-	nupa_meta_data_init();
+#if CONFIG_SUPPORT_WAF
+	nupa_meta_data_init(g_nupa_dev->nupa_buf);
+#endif
 	nupa_uio_init();
 	return 0;
 out:
