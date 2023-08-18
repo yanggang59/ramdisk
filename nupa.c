@@ -330,21 +330,17 @@ static void simple_buf_test(void* buf, long size)
 
 static void nupa_meta_data_init(void* base_addr)
 {	
-	void* test;
-	g_meta_info_header = (struct nupa_meta_info_header*)((unsigned long)base_addr + (unsigned long)NUPA_DATA_SIZE);
+	g_meta_info_header = (struct nupa_meta_info_header*)((char*)base_addr + NUPA_DATA_SIZE);
 #ifndef USER_APP
 	memset(g_meta_info_header, 0, sizeof(struct nupa_meta_info_header) + 2 * sizeof(struct queue) + 2 * QUEUE_SIZE * sizeof(struct nupa_queue_entry));
 	memset(g_meta_info_header->vb, 0xFF, sizeof(g_meta_info_header->vb));
 #endif
-	g_nupa_sub_queue = (struct queue *)((unsigned long)g_meta_info_header + sizeof(struct nupa_meta_info_header));
-	//memset(g_nupa_sub_queue, 0, sizeof(struct queue));
+	g_nupa_sub_queue = (struct queue *)((char*)g_meta_info_header + sizeof(struct nupa_meta_info_header));
 	g_nupa_sub_queue->size = QUEUE_SIZE;
 
-	g_nupa_com_queue = (struct queue *)((unsigned long)g_nupa_sub_queue + sizeof(struct queue) + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
+	g_nupa_com_queue = (struct queue *)((char*)g_nupa_sub_queue + sizeof(struct queue) + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
 	g_nupa_com_queue->size = QUEUE_SIZE;
-	test = (void*)((unsigned long)g_nupa_com_queue + sizeof(struct queue) + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
-	printk("[nupa_meta_data_init] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_com_queue = %px , test= %px \r\n", \
-	g_meta_info_header, g_nupa_sub_queue, g_nupa_com_queue, test);
+	printk("[nupa_meta_data_init] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_com_queue = %px \r\n", g_meta_info_header, g_nupa_sub_queue, g_nupa_com_queue);
 #ifndef USER_APP
 	spin_lock_init(&g_queue_lock);
 #endif
@@ -366,18 +362,15 @@ static int __init blockdev_init(void)
 #else
 	base_addr = (unsigned long)ioremap(RESERVE_MEM_START, NUPA_DISK_SIZE);
 	g_nupa_dev->nupa_buf = (void*)base_addr;
-	printk("[Init] base_addr = 0x%lX \r\n", base_addr);
 #endif
 #if DEBUG
 	simple_buf_test(g_nupa_dev->nupa_buf, 1024 * 1024);
-	printk("[Info] nupa_buf = %px \r\n", g_nupa_dev->nupa_buf);
 #endif	
     ret = nupa_register_disk(g_nupa_dev);
     if (ret) {
 		goto out;
 	}
 #if CONFIG_SUPPORT_WAF
-	printk("[Info] g_nupa_dev->nupa_buf = %p \r\n", g_nupa_dev->nupa_buf);
 	nupa_meta_data_init(g_nupa_dev->nupa_buf);
 #endif
 	nupa_uio_init();

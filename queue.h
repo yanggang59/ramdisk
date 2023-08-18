@@ -117,13 +117,14 @@ static inline bool qempty(int head, int tail)
 
 static int qpush(struct queue *qbase, void *val, int entry_size)
 {
+
+	int tail ,size ,head;
 #ifndef USER_APP
 	spin_lock(&g_queue_lock);
 #endif
-	int const tail = rd_queue_tail(qbase);
-	int const size = qbase->size;
-	int head = rd_queue_head(qbase);
-	//int head_;
+	tail = rd_queue_tail(qbase);
+	size = qbase->size;
+	head = rd_queue_head(qbase);
 
 	if (qfull(head, tail, size)) {
 #ifndef USER_APP
@@ -142,14 +143,13 @@ static int qpush(struct queue *qbase, void *val, int entry_size)
 
 static int qpop(struct queue *q, void *val, int entry_size)
 {
+	int head ,size ,tail;
 #ifndef USER_APP
 	spin_lock(&g_queue_lock);
 #endif
-	int const head = rd_queue_head(q);
-	int const size = q->size;
-	int tail = rd_queue_tail(q);
-	//int tail_;
-	
+	head = rd_queue_head(q);
+	size = q->size;
+	tail = rd_queue_tail(q);	
 	if (qempty(head, tail)) {
 #ifndef USER_APP
 		spin_unlock(&g_queue_lock);
