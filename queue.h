@@ -3,13 +3,21 @@
 #define __QUEUE_H__
 
 
+#ifndef USER_APP
+#include <linux/spinlock.h>
+//static DEFINE_SPINLOCK(g_sub_queue_lock);
+//static DEFINE_SPINLOCK(g_com_queue_lock);
+static DEFINE_SPINLOCK(g_queue_lock);
+#endif
+
+
 struct queue {
 	int head;
 	int tail;
 	int size;
-	void *entries;
-	void (*assign_to)(struct queue *, int head, void *y); // push
-	void (*assign_from)(struct queue *, int tail, void *x); //pop
+	unsigned long entries;
+	//void (*assign_to)(struct queue *, int head, void *y); // push
+	//void (*assign_from)(struct queue *, int tail, void *x); //pop
 };
 
 /* shall be atomic */
@@ -35,6 +43,64 @@ struct queue {
 #define queue_arr(q)		\
 		(q->arr)
 
+#ifndef USER_APP
+static void* simple_memcpy(void* arr2, void* arr1, size_t count)
+{
+	void* ret = arr2;
+	while (count--)
+	{
+		*(char*)arr2 = *(char*)arr1;
+		arr1 = (char*)arr1 + 1;
+		arr2 = (char*)arr2 + 1;
+	}
+	return ret;
+}
+#endif
+
+static void queue_assign_to(struct queue *qbase, void *value, int size)
+{
+#if 0
+	struct nupa_queue_entry* entry = (struct nupa_queue_entry*)((char*)qbase->entries + (head * sizeof(struct nupa_queue_entry)));
+	struct nupa_queue_entry* _entry = (struct nupa_queue_entry*)value;
+	entry->pb  = _entry->pb;
+	entry->req = _entry->req;
+#endif
+#ifndef USER_APP
+	printk("memcpy In \r\n");
+#endif
+#ifdef USER_APP
+	memcpy((char*)qbase->entries + (qbase->head * size), value, size);
+#else
+	printk("copy to %px \r\n", (char*)qbase->entries + (qbase->head * size));
+	simple_memcpy((char*)qbase->entries + (qbase->head * size), value, size);
+#endif
+#ifndef USER_APP
+	printk("memcpy Out \r\n");
+#endif
+}
+
+static void queue_assign_from(struct queue *qbase, void *value, int size)
+{
+#if 0
+	struct nupa_queue_entry* entry = (struct nupa_queue_entry*)((char*)qbase->entries + (tail * sizeof(struct nupa_queue_entry)));
+	struct nupa_queue_entry* _entry = (struct nupa_queue_entry*)value;
+	_entry->pb  = entry->pb;
+	_entry->req = entry->req;
+#endif
+#ifndef USER_APP
+	printk("memcpy In \r\n");
+#endif
+#ifdef USER_APP
+	memcpy(value, (char*)qbase->entries + (qbase->tail * size), size);
+#else
+	simple_memcpy(value, (char*)qbase->entries + (qbase->tail * size), size);
+#endif
+#ifndef USER_APP
+	printk("memcpy out \r\n");
+#endif
+}
+
+
 /* size shall be pow of 2 */
 static inline bool qfull(int head, int tail, int size)
 {
@@ -51,44 +117,54 @@ static inline bool qempty(int head, int tail)
 	return head == tail;
 }
 
-static int qpush(struct queue *qbase, void *val)
+static int qpush(struct queue *qbase, void *val, int entry_size)
 {
+#ifndef USER_APP
+	spin_lock(&g_queue_lock);
+#endif
 	int const tail = rd_queue_tail(qbase);
 	int const size = qbase->size;
 	int head = rd_queue_head(qbase);
-	int head_;
+	//int head_;
 
 	if (qfull(head, tail, size)) {
+#ifndef USER_APP
+		spin_unlock(&g_queue_lock);
+#endif		
 		return -1;
 	}
-#ifndef USER_APP
-	printk("assign_to In \r\n");
-#endif
-	qbase->assign_to(qbase, head_ = head, val);
-#ifndef USER_APP
-	printk("assign_to Out \r\n");
-#endif
+	queue_assign_to(qbase, val, entry_size);
 	head = (head + 1) & (size - 1);
 	set_queue_head(qbase, head);
-
+#ifndef USER_APP
+	spin_unlock(&g_queue_lock);
+#endif	
 	return 0;
 }
 
-static int qpop(struct queue *q, void *val)
+static int qpop(struct queue *q, void *val, int entry_size)
 {
+#ifndef USER_APP
+	spin_lock(&g_queue_lock);
+#endif
 	int const head = rd_queue_head(q);
 	int const size = q->size;
 	int tail = rd_queue_tail(q);
-	int tail_;
+	//int tail_;
 	
 	if (qempty(head, tail)) {
+#ifndef USER_APP
+		spin_unlock(&g_queue_lock);
+#endif
 		return -1;
 	}
 
-	q->assign_from(q, tail_ = tail, val);
+	queue_assign_from(q, val, entry_size);
 	tail = (tail + 1) & (size - 1);
 	set_queue_tail(q, tail);
-
+#ifndef USER_APP
+	spin_unlock(&g_queue_lock);
+#endif
 	return 0;
 }
 

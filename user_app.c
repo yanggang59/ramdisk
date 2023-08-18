@@ -6,6 +6,7 @@
 #include <errno.h> 
 #include <string.h>
 #include <stdbool.h>
+#include <signal.h>
 
 #define USER_APP
 #include "nupa.h" 
@@ -23,6 +24,8 @@ struct queue *g_nupa_sub_queue;
 struct queue *g_nupa_com_queue;
 
 static void* g_data_buf;
+
+int g_interrupt = 0;
 
 #define PRINT printf
 static void print_buf(char* buf, int size)
@@ -43,6 +46,43 @@ static void print_buf(char* buf, int size)
 }
 
 
+/**
+*                                                                 entries                          entries
+*       -------------------------------------------------------------------------------------------------------------------
+*       |                                       | header |           |      |      |      |           |      |      |
+*       |                   DATA                |        | sub queue |  x   |   x  |  ... | com queue |  x   |  x   |  ...  
+*       |                                       |        |           |      |      |      |           |      |      |
+*       -------------------------------------------------------------------------------------------------------------------
+*
+*/
+static void nupa_meta_data_init(void* base_addr)
+{	
+	g_meta_info_header = (struct nupa_meta_info_header*)((unsigned long)base_addr + (unsigned long)NUPA_DATA_SIZE);
+#ifndef USER_APP
+	memset(g_meta_info_header, 0, sizeof(struct nupa_meta_info_header) + 2 * sizeof(struct queue) + 2 * QUEUE_SIZE * sizeof(struct nupa_queue_entry));
+	//memset(g_meta_info_header, 0, sizeof(struct nupa_meta_info_header));
+	memset(g_meta_info_header->vb, 0xFF, sizeof(g_meta_info_header->vb));
+#endif
+	g_nupa_sub_queue = (struct queue *)((unsigned long)g_meta_info_header + sizeof(struct nupa_meta_info_header));
+	//memset(g_nupa_sub_queue, 0, sizeof(struct queue));
+	g_nupa_sub_queue->size = QUEUE_SIZE;
+	g_nupa_sub_queue->entries = (unsigned long)g_nupa_sub_queue + sizeof(struct queue);
+	//g_nupa_sub_queue->assign_to = queue_assign_to;
+	//g_nupa_sub_queue->assign_from = queue_assign_from;
+
+	g_nupa_com_queue = (struct queue *)((unsigned long)g_nupa_sub_queue + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
+	//memset(g_nupa_com_queue, 0, sizeof(struct queue));
+	g_nupa_com_queue->size = QUEUE_SIZE;
+	g_nupa_com_queue->entries = (unsigned long)g_nupa_com_queue + sizeof(struct queue);
+	//g_nupa_com_queue->assign_to = queue_assign_to;
+	//g_nupa_com_queue->assign_from = queue_assign_from;
+#ifndef USER_APP
+	spin_lock_init(&g_queue_lock);
+#endif
+	return;
+}
+
+
 static void user_process_write(struct nupa_queue_entry* cur_entry, int fd)
 {
     unsigned long pb = cur_entry->pb;
@@ -56,11 +96,11 @@ static void user_process_write(struct nupa_queue_entry* cur_entry, int fd)
 		.req = REQ_WRITE,
 	};
 	//push into com queue
-	while(qpush(g_nupa_com_queue, &tmp_entry));
+	while(qpush(g_nupa_com_queue, &tmp_entry, sizeof(struct nupa_queue_entry)));
     /**
     * Note: remember to clean dirty bit of the vb
     */
-    clr_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
+    //clr_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
 }
 
 static void user_process_read(struct nupa_queue_entry* cur_entry, int fd)
@@ -76,16 +116,37 @@ static void user_process_read(struct nupa_queue_entry* cur_entry, int fd)
 		.req = REQ_READ,
 	};
 	//push into com queue
-	while(qpush(g_nupa_com_queue, &tmp_entry));
+	while(qpush(g_nupa_com_queue, &tmp_entry, sizeof(struct nupa_queue_entry)));
 }
-  
+
+static void sigcb(int signo) 
+{
+	switch(signo) {
+	case SIGHUP:
+		printf("Get a signal -- SIGHUP\n");
+		break;
+	case SIGINT://Ctrl+C
+		printf("Get a signal -- SIGINT\n");
+    g_interrupt = 1;
+		break;
+	case SIGQUIT:
+		printf("Get a signal -- SIGQUIT\n");
+		break;
+	}
+	return;
+}
+
 int main(void)  
 {  
   int uio_fd, addr_fd, size_fd, storage_fd;  
   long uio_size;  
   void* uio_addr, *access_address;
   off_t offset = 0; 
-  struct nupa_queue_entry cur_entry; 
+  struct nupa_queue_entry cur_entry;
+
+  signal(SIGHUP, sigcb);
+	signal(SIGINT, sigcb);
+	signal(SIGQUIT, sigcb);
    
   uio_fd = open(UIO_DEV, /*O_RDONLY*/O_RDWR);  
   addr_fd = open(UIO_ADDR, O_RDONLY);  
@@ -125,7 +186,9 @@ int main(void)
      *   Fetch a req form subq
     */
     //sleep(1);
-    while(qpop(g_nupa_sub_queue, &cur_entry));
+    while(!g_interrupt && qpop(g_nupa_sub_queue, &cur_entry, sizeof(struct nupa_queue_entry)));
+    if(g_interrupt)
+      break;
     switch (cur_entry.req) {
         case REQ_WRITE:
             printf("[DEBUG] handle write req : %lu \r\n", cur_entry.pb);

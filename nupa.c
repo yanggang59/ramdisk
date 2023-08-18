@@ -95,10 +95,10 @@ static void sync_read(unsigned long pb)
 		.req = REQ_READ,
 	};
 	//push into sub queue
-	while(qpush(g_nupa_sub_queue, &tmp_entry));
+	while(qpush(g_nupa_sub_queue, &tmp_entry, sizeof(struct nupa_queue_entry)));
 	
 	//get result from com queue
-	while((qpop(g_nupa_com_queue, &tmp_entry)) && (tmp_entry.pb == pb) && (tmp_entry.req == REQ_READ));
+	while((qpop(g_nupa_com_queue, &tmp_entry, sizeof(struct nupa_queue_entry))) && (tmp_entry.pb == pb) && (tmp_entry.req == REQ_READ));
 }
 
 
@@ -112,7 +112,7 @@ static void async_write(unsigned long pb)
 #ifndef USER_APP
 	printk("async_write In \r\n");
 #endif
-	while(qpush(g_nupa_sub_queue, &tmp_entry));
+	while(qpush(g_nupa_sub_queue, &tmp_entry, sizeof(struct nupa_queue_entry)));
 #ifndef USER_APP
 	printk("async_write Out \r\n");
 #endif
@@ -209,7 +209,8 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
 			set_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
 			printk("[Info] mark dirty done  \r\n");
 			g_meta_info_header->vb[vb] = pb;
-			printk("[Info] replace cache done  \r\n");
+			printk("[Info] replace cache done \r\n");
+			printk("[Info] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_sub_queue->entries = %px, g_nupa_com_queue = %px , g_nupa_com_queue->entries = %px \r\n", g_meta_info_header, g_nupa_sub_queue, g_nupa_sub_queue->entries, g_nupa_com_queue, g_nupa_com_queue->entries);
 			async_write(pb);
 			printk("[Info] async write done  \r\n");
 		} else if(g_meta_info_header->vb[vb] != pb) {
@@ -327,9 +328,37 @@ static void simple_buf_test(void* buf, long size)
 }
 #endif
 
+static void nupa_meta_data_init(void* base_addr)
+{	
+	g_meta_info_header = (struct nupa_meta_info_header*)((unsigned long)base_addr + (unsigned long)NUPA_DATA_SIZE);
+#ifndef USER_APP
+	memset(g_meta_info_header, 0, sizeof(struct nupa_meta_info_header) + 2 * sizeof(struct queue) + 2 * QUEUE_SIZE * sizeof(struct nupa_queue_entry));
+	//memset(g_meta_info_header, 0, sizeof(struct nupa_meta_info_header));
+	memset(g_meta_info_header->vb, 0xFF, sizeof(g_meta_info_header->vb));
+#endif
+	g_nupa_sub_queue = (struct queue *)((unsigned long)g_meta_info_header + sizeof(struct nupa_meta_info_header));
+	//memset(g_nupa_sub_queue, 0, sizeof(struct queue));
+	g_nupa_sub_queue->size = QUEUE_SIZE;
+	g_nupa_sub_queue->entries = (unsigned long)g_nupa_sub_queue + sizeof(struct queue);
+	//g_nupa_sub_queue->assign_to = queue_assign_to;
+	//g_nupa_sub_queue->assign_from = queue_assign_from;
+
+	g_nupa_com_queue = (struct queue *)((unsigned long)g_nupa_sub_queue + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
+	//memset(g_nupa_com_queue, 0, sizeof(struct queue));
+	g_nupa_com_queue->size = QUEUE_SIZE;
+	g_nupa_com_queue->entries = (unsigned long)g_nupa_com_queue + sizeof(struct queue);
+	//g_nupa_com_queue->assign_to = queue_assign_to;
+	//g_nupa_com_queue->assign_from = queue_assign_from;
+#ifndef USER_APP
+	spin_lock_init(&g_queue_lock);
+#endif
+	return;
+}
+
 static int __init blockdev_init(void)
 {
 	int ret;
+	unsigned long base_addr;
 	g_nupa_dev = kmalloc(sizeof(struct nupa_dev), GFP_KERNEL);
 	if(!g_nupa_dev) {
 		printk("[Error] Create nupa_dev failed \r\n");
@@ -339,7 +368,9 @@ static int __init blockdev_init(void)
 #if LOCAL_RAMDISK_TEST
 	g_nupa_dev->nupa_buf = kmalloc(NUPA_DISK_SIZE, GFP_KERNEL);
 #else
-	g_nupa_dev->nupa_buf = ioremap(RESERVE_MEM_START, NUPA_DISK_SIZE);
+	base_addr = (unsigned long)ioremap(RESERVE_MEM_START, NUPA_DISK_SIZE);
+	g_nupa_dev->nupa_buf = (void*)base_addr;
+	printk("[Init] base_addr = 0x%lX \r\n", base_addr);
 #endif
 #if DEBUG
 	simple_buf_test(g_nupa_dev->nupa_buf, 1024 * 1024);
@@ -350,6 +381,7 @@ static int __init blockdev_init(void)
 		goto out;
 	}
 #if CONFIG_SUPPORT_WAF
+	printk("[Info] g_nupa_dev->nupa_buf = %p \r\n", g_nupa_dev->nupa_buf);
 	nupa_meta_data_init(g_nupa_dev->nupa_buf);
 #endif
 	nupa_uio_init();
