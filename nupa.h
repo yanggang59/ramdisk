@@ -13,7 +13,8 @@
 #define NUPA_META_DATA_LEN                              (24UL * (NUPA_BLOCK_SIZE))
 #define NUPA_DATA_SIZE                                  (unsigned long)(RESERVE_MEM_SIZE - NUPA_META_DATA_LEN)
 #define CACHE_BLOCK_NUM                                 (NUPA_DATA_SIZE / NUPA_BLOCK_SIZE)
-#define BITMAP_SIZE                                     ((CACHE_BLOCK_NUM + sizeof(unsigned long) -1 )/sizeof(unsigned long))
+#define BIT_PER_BYTE                                    8 
+#define BITMAP_SIZE                                     ((CACHE_BLOCK_NUM + BIT_PER_BYTE -1 )/BIT_PER_BYTE)
 #define LOCAL_RAMDISK_TEST                              0
 #if LOCAL_RAMDISK_TEST
 #define NUPA_DISK_SIZE                                  (1024UL * 1024UL)
@@ -24,7 +25,7 @@
 
 
 struct nupa_meta_info_header {
-	unsigned long dirty_bit_map[BITMAP_SIZE];
+	char dirty_bit_map[BITMAP_SIZE];
 	unsigned long vb[CACHE_BLOCK_NUM];
 };
 
@@ -41,15 +42,15 @@ struct nupa_queue_entry {
 	enum req_type req; 
 };
 
-static bool is_vb_dirty(unsigned long vb, unsigned long* dirty_bit_map)
+static bool is_vb_dirty(unsigned long vb, char* dirty_bit_map)
 {
 	unsigned long byte = vb / sizeof(unsigned long);
 	unsigned long offset = vb % sizeof(unsigned long);
-	unsigned value = dirty_bit_map[byte];
+	char value = dirty_bit_map[byte];
 	return (value & (1 << offset));
 }
 
-static void set_vb_dirty(unsigned long vb, unsigned long* dirty_bit_map)
+static void set_vb_dirty(unsigned long vb, char* dirty_bit_map)
 {
 	unsigned long byte = vb / sizeof(unsigned long);
 	unsigned long offset = vb % sizeof(unsigned long);
@@ -57,7 +58,7 @@ static void set_vb_dirty(unsigned long vb, unsigned long* dirty_bit_map)
 }
 
 #ifdef USER_APP
-static void clr_vb_dirty(unsigned long vb, unsigned long* dirty_bit_map)
+static void clr_vb_dirty(unsigned long vb, char* dirty_bit_map)
 {
 	unsigned long byte = vb / sizeof(unsigned long);
 	unsigned long offset = vb % sizeof(unsigned long);

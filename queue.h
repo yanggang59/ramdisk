@@ -15,9 +15,7 @@ struct queue {
 	int head;
 	int tail;
 	int size;
-	unsigned long entries;
-	//void (*assign_to)(struct queue *, int head, void *y); // push
-	//void (*assign_from)(struct queue *, int tail, void *x); //pop
+	//unsigned long entries;
 };
 
 /* shall be atomic */
@@ -60,7 +58,7 @@ static void* simple_memcpy(void* arr2, void* arr1, size_t count)
 static void queue_assign_to(struct queue *qbase, void *value, int size)
 {
 #if 0
-	struct nupa_queue_entry* entry = (struct nupa_queue_entry*)((char*)qbase->entries + (head * sizeof(struct nupa_queue_entry)));
+	struct nupa_queue_entry* entry = (struct nupa_queue_entry*)((char*)qbase + sizeof(struct queue) + (head * sizeof(struct nupa_queue_entry)));
 	struct nupa_queue_entry* _entry = (struct nupa_queue_entry*)value;
 	entry->pb  = _entry->pb;
 	entry->req = _entry->req;
@@ -69,10 +67,10 @@ static void queue_assign_to(struct queue *qbase, void *value, int size)
 	printk("memcpy In \r\n");
 #endif
 #ifdef USER_APP
-	memcpy((char*)qbase->entries + (qbase->head * size), value, size);
+	memcpy((char*)qbase + sizeof(struct queue) + (qbase->head * size), value, size);
 #else
-	printk("copy to %px \r\n", (char*)qbase->entries + (qbase->head * size));
-	simple_memcpy((char*)qbase->entries + (qbase->head * size), value, size);
+	printk("copy to %px \r\n", (char*)qbase + sizeof(struct queue) + (qbase->head * size));
+	simple_memcpy((char*)qbase + sizeof(struct queue) + (qbase->head * size), value, size);
 #endif
 #ifndef USER_APP
 	printk("memcpy Out \r\n");
@@ -82,7 +80,7 @@ static void queue_assign_to(struct queue *qbase, void *value, int size)
 static void queue_assign_from(struct queue *qbase, void *value, int size)
 {
 #if 0
-	struct nupa_queue_entry* entry = (struct nupa_queue_entry*)((char*)qbase->entries + (tail * sizeof(struct nupa_queue_entry)));
+	struct nupa_queue_entry* entry = (struct nupa_queue_entry*)((char*)qbase + sizeof(struct queue) + (tail * sizeof(struct nupa_queue_entry)));
 	struct nupa_queue_entry* _entry = (struct nupa_queue_entry*)value;
 	_entry->pb  = entry->pb;
 	_entry->req = entry->req;
@@ -91,9 +89,9 @@ static void queue_assign_from(struct queue *qbase, void *value, int size)
 	printk("memcpy In \r\n");
 #endif
 #ifdef USER_APP
-	memcpy(value, (char*)qbase->entries + (qbase->tail * size), size);
+	memcpy(value, (char*)qbase + sizeof(struct queue) + (qbase->tail * size), size);
 #else
-	simple_memcpy(value, (char*)qbase->entries + (qbase->tail * size), size);
+	simple_memcpy(value, (char*)qbase + sizeof(struct queue) + (qbase->tail * size), size);
 #endif
 #ifndef USER_APP
 	printk("memcpy out \r\n");

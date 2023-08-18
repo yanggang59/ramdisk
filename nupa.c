@@ -210,7 +210,7 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
 			printk("[Info] mark dirty done  \r\n");
 			g_meta_info_header->vb[vb] = pb;
 			printk("[Info] replace cache done \r\n");
-			printk("[Info] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_sub_queue->entries = %px, g_nupa_com_queue = %px , g_nupa_com_queue->entries = %px \r\n", g_meta_info_header, g_nupa_sub_queue, g_nupa_sub_queue->entries, g_nupa_com_queue, g_nupa_com_queue->entries);
+			printk("[Info] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_com_queue = %px \r\n", g_meta_info_header, g_nupa_sub_queue, g_nupa_com_queue);
 			async_write(pb);
 			printk("[Info] async write done  \r\n");
 		} else if(g_meta_info_header->vb[vb] != pb) {
@@ -330,25 +330,21 @@ static void simple_buf_test(void* buf, long size)
 
 static void nupa_meta_data_init(void* base_addr)
 {	
+	void* test;
 	g_meta_info_header = (struct nupa_meta_info_header*)((unsigned long)base_addr + (unsigned long)NUPA_DATA_SIZE);
 #ifndef USER_APP
 	memset(g_meta_info_header, 0, sizeof(struct nupa_meta_info_header) + 2 * sizeof(struct queue) + 2 * QUEUE_SIZE * sizeof(struct nupa_queue_entry));
-	//memset(g_meta_info_header, 0, sizeof(struct nupa_meta_info_header));
 	memset(g_meta_info_header->vb, 0xFF, sizeof(g_meta_info_header->vb));
 #endif
 	g_nupa_sub_queue = (struct queue *)((unsigned long)g_meta_info_header + sizeof(struct nupa_meta_info_header));
 	//memset(g_nupa_sub_queue, 0, sizeof(struct queue));
 	g_nupa_sub_queue->size = QUEUE_SIZE;
-	g_nupa_sub_queue->entries = (unsigned long)g_nupa_sub_queue + sizeof(struct queue);
-	//g_nupa_sub_queue->assign_to = queue_assign_to;
-	//g_nupa_sub_queue->assign_from = queue_assign_from;
 
-	g_nupa_com_queue = (struct queue *)((unsigned long)g_nupa_sub_queue + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
-	//memset(g_nupa_com_queue, 0, sizeof(struct queue));
+	g_nupa_com_queue = (struct queue *)((unsigned long)g_nupa_sub_queue + sizeof(struct queue) + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
 	g_nupa_com_queue->size = QUEUE_SIZE;
-	g_nupa_com_queue->entries = (unsigned long)g_nupa_com_queue + sizeof(struct queue);
-	//g_nupa_com_queue->assign_to = queue_assign_to;
-	//g_nupa_com_queue->assign_from = queue_assign_from;
+	test = (void*)((unsigned long)g_nupa_com_queue + sizeof(struct queue) + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
+	printk("[nupa_meta_data_init] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_com_queue = %px , test= %px \r\n", \
+	g_meta_info_header, g_nupa_sub_queue, g_nupa_com_queue, test);
 #ifndef USER_APP
 	spin_lock_init(&g_queue_lock);
 #endif
@@ -374,7 +370,7 @@ static int __init blockdev_init(void)
 #endif
 #if DEBUG
 	simple_buf_test(g_nupa_dev->nupa_buf, 1024 * 1024);
-	printk("[Info] nupa_buf = %p \r\n", g_nupa_dev->nupa_buf);
+	printk("[Info] nupa_buf = %px \r\n", g_nupa_dev->nupa_buf);
 #endif	
     ret = nupa_register_disk(g_nupa_dev);
     if (ret) {
