@@ -25,44 +25,44 @@
 
 
 struct nupa_meta_info_header {
-	char dirty_bit_map[BITMAP_SIZE];
-	unsigned long vb[CACHE_BLOCK_NUM];
+    char dirty_bit_map[BITMAP_SIZE];
+    unsigned long vb[CACHE_BLOCK_NUM];
 };
 
 /**************************************************subq and comq*************************************************/
 
-#define QUEUE_SIZE	      128
+#define QUEUE_SIZE          128
 enum req_type { 
-	REQ_READ = 1, 
-	REQ_WRITE,  
+    REQ_READ = 1, 
+    REQ_WRITE,  
 };
 
 struct nupa_queue_entry {
-	unsigned long pb;
-	enum req_type req; 
+    unsigned long pb;
+    enum req_type req; 
 };
 
 static bool is_vb_dirty(unsigned long vb, char* dirty_bit_map)
 {
-	unsigned long byte = vb / sizeof(unsigned long);
-	unsigned long offset = vb % sizeof(unsigned long);
-	char value = dirty_bit_map[byte];
-	return (value & (1 << offset));
+    unsigned long byte = vb / sizeof(unsigned long);
+    unsigned long offset = vb % sizeof(unsigned long);
+    char value = dirty_bit_map[byte];
+    return (value & (1 << offset));
 }
 
 static void set_vb_dirty(unsigned long vb, char* dirty_bit_map)
 {
-	unsigned long byte = vb / sizeof(unsigned long);
-	unsigned long offset = vb % sizeof(unsigned long);
-	dirty_bit_map[byte] |= 1 << offset;
+    unsigned long byte = vb / sizeof(unsigned long);
+    unsigned long offset = vb % sizeof(unsigned long);
+    dirty_bit_map[byte] |= 1 << offset;
 }
 
 #ifdef USER_APP
 static void clr_vb_dirty(unsigned long vb, char* dirty_bit_map)
 {
-	unsigned long byte = vb / sizeof(unsigned long);
-	unsigned long offset = vb % sizeof(unsigned long);
-	dirty_bit_map[byte] &= ~(1 << offset);
+    unsigned long byte = vb / sizeof(unsigned long);
+    unsigned long offset = vb % sizeof(unsigned long);
+    dirty_bit_map[byte] &= ~(1 << offset);
 }
 #endif
 
