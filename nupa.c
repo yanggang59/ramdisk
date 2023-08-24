@@ -118,6 +118,30 @@ static void async_write(unsigned long pb)
 #endif
 }
 
+static void nupa_process_com_queue(void)
+{
+    struct nupa_queue_entry tmp_entry = {
+        .pb = 0,
+        .req = REQ_INVALID,
+    };
+    unsigned long pb, vb;
+    //get result from com queue
+    printk("nupa_process_com_queue In \r\n");
+    while(!qpop(g_nupa_com_queue, &tmp_entry, sizeof(struct nupa_queue_entry))){
+        if(REQ_WRITE == tmp_entry.req) {
+            pb = tmp_entry.pb;
+            vb = pb % CACHE_BLOCK_NUM;
+            clr_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
+            printk("[Info] process write, pb = %lu , g_meta_info_header->dirty_bit_map[0] = %d \r\n", pb, (int)g_meta_info_header->dirty_bit_map[0]);
+        }else{
+            pb = tmp_entry.pb;
+            printk("[Info] process write, pb = %lu , g_meta_info_header->dirty_bit_map[0] = %d \r\n", pb, (int)g_meta_info_header->dirty_bit_map[0]);
+            printk("[Info] No need to process read req , req = %d \r\n", tmp_entry.req);
+        }
+    }
+    printk("nupa_process_com_queue Out \r\n");
+}
+
 /**
 * for read
 * 1. if vb is invalid or vb is not equal to pb, read frome remote
@@ -132,6 +156,7 @@ static void nupa_process_read(void* u_buf, void* k_buf, unsigned long start, str
     unsigned long pb , vb, addr, size;
     unsigned long len  = bvec->bv_len;
     unsigned long offset = bvec->bv_offset;
+    nupa_process_com_queue();
     while(len) {
         pb = start / NUPA_BLOCK_SIZE;
         vb = pb % CACHE_BLOCK_NUM;
@@ -189,6 +214,7 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
     unsigned long len  = bvec->bv_len;
     unsigned long offset = bvec->bv_offset;
     printk("[Info] nupa_process_write In , start = %lu, len = %lu , offset = %lu\r\n",start, len, offset);
+    nupa_process_com_queue();
     while(len) {
         pb = start / NUPA_BLOCK_SIZE;
         vb = pb % CACHE_BLOCK_NUM;
@@ -237,7 +263,9 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
             * 5. async write to remote
             */
             printk("[Info] rewrite \r\n");
-            while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map)); 
+            while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map)) {
+                nupa_process_com_queue();
+            }
             memcpy(k_buf + addr, u_buf + offset, len);
             set_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
             async_write(pb);

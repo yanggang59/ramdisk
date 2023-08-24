@@ -11,6 +11,10 @@ static DEFINE_SPINLOCK(g_queue_lock);
 #endif
 
 
+/* This is x86 specific */
+#define read_barrier()  __asm__ __volatile__("":::"memory")
+#define write_barrier() __asm__ __volatile__("":::"memory")
+
 struct queue {
     int head;
     int tail;
@@ -122,6 +126,7 @@ static int qpush(struct queue *qbase, void *val, int entry_size)
 #ifndef USER_APP
     spin_lock(&g_queue_lock);
 #endif
+    read_barrier();
     tail = rd_queue_tail(qbase);
     size = qbase->size;
     head = rd_queue_head(qbase);
@@ -129,27 +134,34 @@ static int qpush(struct queue *qbase, void *val, int entry_size)
     if (qfull(head, tail, size)) {
 #ifndef USER_APP
         spin_unlock(&g_queue_lock);
-#endif        
+#endif      
         return -1;
     }
     queue_assign_to(qbase, val, entry_size);
     head = (head + 1) & (size - 1);
     set_queue_head(qbase, head);
+#ifdef USER_APP
+    printf("[qpush] head = %d ,tail = %d\r\n", qbase->head, qbase->tail);
+#else
+    printk("[qpush] head = %d ,tail = %d\r\n", qbase->head, qbase->tail);
+#endif
+    write_barrier();
 #ifndef USER_APP
     spin_unlock(&g_queue_lock);
 #endif    
     return 0;
 }
 
-static int qpop(struct queue *q, void *val, int entry_size)
+static int qpop(struct queue *qbase, void *val, int entry_size)
 {
     int head ,size ,tail;
 #ifndef USER_APP
     spin_lock(&g_queue_lock);
 #endif
-    head = rd_queue_head(q);
-    size = q->size;
-    tail = rd_queue_tail(q);    
+    read_barrier();
+    head = rd_queue_head(qbase);
+    size = qbase->size;
+    tail = rd_queue_tail(qbase);    
     if (qempty(head, tail)) {
 #ifndef USER_APP
         spin_unlock(&g_queue_lock);
@@ -157,9 +169,15 @@ static int qpop(struct queue *q, void *val, int entry_size)
         return -1;
     }
 
-    queue_assign_from(q, val, entry_size);
+    queue_assign_from(qbase, val, entry_size);
     tail = (tail + 1) & (size - 1);
-    set_queue_tail(q, tail);
+    set_queue_tail(qbase, tail);
+#ifdef USER_APP
+    printf("[qpop] head = %d ,tail = %d\r\n", qbase->head, qbase->tail);
+#else
+    printk("[qpop] head = %d ,tail = %d\r\n", qbase->head, qbase->tail);
+#endif
+    write_barrier();
 #ifndef USER_APP
     spin_unlock(&g_queue_lock);
 #endif
