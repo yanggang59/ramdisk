@@ -26,13 +26,14 @@ struct uio_info nupa_uio_info = {
 };
 
 
-static int nupa_uio_probe(struct platform_device *pdev) {
-  struct device *dev = &pdev->dev;
-  nupa_uio_info.mem[0].name = "area1";
-  nupa_uio_info.mem[0].addr = RESERVE_MEM_START;
-  nupa_uio_info.mem[0].memtype = UIO_MEM_PHYS;
-  nupa_uio_info.mem[0].size = NUPA_DISK_SIZE;
-  return uio_register_device(dev, &nupa_uio_info);
+static int nupa_uio_probe(struct platform_device *pdev) 
+{
+    struct device *dev = &pdev->dev;
+    nupa_uio_info.mem[0].name = "area1";
+    nupa_uio_info.mem[0].addr = RESERVE_MEM_START;
+    nupa_uio_info.mem[0].memtype = UIO_MEM_PHYS;
+    nupa_uio_info.mem[0].size = NUPA_DISK_SIZE;
+    return uio_register_device(dev, &nupa_uio_info);
 }
 
 static int nupa_uio_remove(struct platform_device *pdev) 
@@ -53,8 +54,8 @@ static struct platform_driver nupa_uio_driver = {
 
 static int nupa_uio_init(void) 
 {
-  nupa_uio_device = platform_device_register_simple("nupa_uio", -1, NULL, 0);
-  return platform_driver_register(&nupa_uio_driver);
+    nupa_uio_device = platform_device_register_simple("nupa_uio", -1, NULL, 0);
+    return platform_driver_register(&nupa_uio_driver);
 }
 
 static void nupa_uio_exit(void) 
