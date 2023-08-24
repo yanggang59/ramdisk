@@ -145,7 +145,7 @@ static void nupa_process_com_queue(void)
 /**
 * for read
 * 1. if vb is invalid or vb is not equal to pb, read frome remote
-*     if vb is invalid ,do we have to wait until we read from remote? 
+*    if vb is invalid ,do we have to wait until we read from remote? 
 *    consider rebuild case, simplest solution is read from remote ,could be optimized later
 * 2. if vb is valid , check dirty bit
 *   (1) if clean, direct read
