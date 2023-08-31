@@ -11,11 +11,12 @@
 #define USER_APP
 #include "nupa.h" 
   
-#define UIO_DEV           "/dev/uio0"  
-#define UIO_ADDR          "/sys/class/uio/uio0/maps/map0/addr"  
-#define UIO_SIZE          "/sys/class/uio/uio0/maps/map0/size"
-#define STORAGE_FILE      "./test.img"
-#define DEBUG             1
+#define UIO_DEV                             "/dev/uio0"  
+#define UIO_ADDR                            "/sys/class/uio/uio0/maps/map0/addr"  
+#define UIO_SIZE                            "/sys/class/uio/uio0/maps/map0/size"
+#define STORAGE_FILE                        "./test.img"
+#define LOCAL_STORAGE_SIZE                  (16 << 30)UL
+#define DEBUG                               1
   
 static char uio_addr_buf[30], uio_size_buf[30];
 
@@ -23,7 +24,8 @@ struct nupa_meta_info_header* g_meta_info_header;
 struct queue *g_nupa_sub_queue;
 struct queue *g_nupa_com_queue;
 
-static void* g_data_buf;
+static void* g_k_buf;
+static void* g_u_buf;
 
 int g_interrupt = 0;
 
@@ -78,13 +80,13 @@ static void user_process_write(struct nupa_queue_entry* cur_entry, int fd)
 {
     unsigned long pb = cur_entry->pb;
     unsigned long vb = pb % CACHE_BLOCK_NUM;
-    off_t offset = pb * NUPA_BLOCK_SIZE;
-    void* buf = g_data_buf + vb * NUPA_BLOCK_SIZE;
-    lseek(fd, offset, SEEK_SET);
-    write(fd, buf, NUPA_BLOCK_SIZE);
+    off_t offset = pb * NUPA_BLOCK_SIZE + cur_entry->offset;
+    void* buf = g_k_buf + vb * NUPA_BLOCK_SIZE;
     struct nupa_queue_entry tmp_entry = {
         .pb = pb,
         .req = REQ_WRITE,
+        .offset = cur_entry->offset,
+        .length = cur_entry->length,
     };
     //push into com queue
     while(qpush(g_nupa_com_queue, &tmp_entry, sizeof(struct nupa_queue_entry)));
@@ -99,7 +101,7 @@ static void user_process_read(struct nupa_queue_entry* cur_entry, int fd)
     unsigned long pb = cur_entry->pb;
     unsigned long vb = pb % CACHE_BLOCK_NUM;
     off_t offset = pb * NUPA_BLOCK_SIZE;
-    void* buf = g_data_buf + vb * NUPA_BLOCK_SIZE;
+    void* buf = g_k_buf + vb * NUPA_BLOCK_SIZE;
     lseek(fd, offset, SEEK_SET);
     read(fd, buf, NUPA_BLOCK_SIZE);
     struct nupa_queue_entry tmp_entry = {
@@ -131,7 +133,7 @@ int main(void)
 {  
     int uio_fd, addr_fd, size_fd, storage_fd;  
     long uio_size;  
-    void* uio_addr, *access_address;
+    void* uio_addr;
     off_t offset = 0; 
     struct nupa_queue_entry cur_entry;
 
@@ -155,19 +157,21 @@ int main(void)
     printf("uiofd = %d \r\n", uio_fd);
     printf(" uio_addr_buf = %s\n uio_size_buf = %s\n uio_addr = %p\n uio_size = 0x%lX\n", uio_addr_buf, uio_size_buf, uio_addr, uio_size);
 
-    g_data_buf = access_address = mmap(NULL, NUPA_DISK_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, uio_fd, 0);  
-    if ( access_address == (void*) -1) {  
+    g_k_buf = mmap(NULL, NUPA_DISK_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, uio_fd, 0);
+    g_u_buf = mmap(NULL, LOCAL_STORAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, storage_fd, 0);
+
+    if ( g_k_buf == (void*) -1) {  
         fprintf(stderr, "mmap: %s\n", strerror(errno));  
         exit(-1);  
     }  
     printf("The device address %p (lenth 0x%lX)\n"  
          "can be accessed over\n"  
-         "logical address %p\n", uio_addr, uio_size, access_address); 
+         "logical address %p\n", uio_addr, uio_size, g_k_buf); 
 #if DEBUG
-    print_buf(access_address, 4096);
+    print_buf(g_k_buf, 4096);
 #endif
 
-    nupa_meta_data_init(access_address);
+    nupa_meta_data_init(g_k_buf);
 
     while(1) {
 
