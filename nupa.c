@@ -103,10 +103,12 @@ static void sync_read(unsigned long pb)
 }
 
 
-static void async_write(unsigned long pb)
+static void async_write(unsigned long pb,unsigned long offset, unsigned long length)
 {
     struct nupa_queue_entry tmp_entry = {
         .pb = pb,
+        .offset = offset,
+        .length = length,
         .req = REQ_WRITE,
     };
     //push into sub queue
@@ -180,6 +182,7 @@ static void nupa_process_read(void* u_buf, void* k_buf, unsigned long start, str
             *  2. if dirty, wait till clean
             *  3. if clean, sync read from remote, set pb, then do local copy  
             */
+            printk("[Read] local cache miss\r\n");
             while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map));
             sync_read(pb);
             g_meta_info_header->vb[vb] = pb;
@@ -230,16 +233,11 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
             * 1. write to local ,set pb and set dirty bit 
             * 2. async write to remote
             */
-            printk("[Info] newly written \r\n");
+            printk("[write] newly written \r\n");
             memcpy(k_buf + addr, u_buf + offset, size);
-            printk("[Info] mem copy done  \r\n");
             set_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
-            printk("[Info] mark dirty done  \r\n");
             g_meta_info_header->vb[vb] = pb;
-            printk("[Info] replace cache done \r\n");
-            printk("[Info] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_com_queue = %px \r\n", g_meta_info_header, g_nupa_sub_queue, g_nupa_com_queue);
-            async_write(pb);
-            printk("[Info] async write done  \r\n");
+            async_write(pb, addr, size);
         } else if(g_meta_info_header->vb[vb] != pb) {
             /**  
             * 1. check dirty bit
@@ -249,12 +247,12 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
             * 5. async write to remote
             */
             // if vb is dirty, wait till app flush dirty block into remote and clean dirty bit
-            printk("[Info] cache miss \r\n");
+            printk("[write] cache miss \r\n");
             while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map)); 
             memcpy(k_buf + addr, u_buf + offset, size);
             set_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
             g_meta_info_header->vb[vb] = pb;
-            async_write(pb);
+            async_write(pb, addr, size);
         } else if(g_meta_info_header->vb[vb] == pb) {
             /** 
             * 1. check dirty bit
@@ -263,13 +261,13 @@ static void nupa_process_write(void* u_buf, void* k_buf, unsigned long start, st
             * 4. write to local , set pb and set dirty bit
             * 5. async write to remote
             */
-            printk("[Info] rewrite \r\n");
+            printk("[write] cache hit \r\n");
             while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map)) {
                 nupa_process_com_queue();
             }
             memcpy(k_buf + addr, u_buf + offset, len);
             set_vb_dirty(vb, g_meta_info_header->dirty_bit_map);
-            async_write(pb);
+            async_write(pb, addr, size);
         } 
         start += size;
         offset += size;
@@ -379,7 +377,6 @@ static void nupa_meta_data_init(void* base_addr)
 static int __init blockdev_init(void)
 {
     int ret;
-    unsigned long base_addr;
     g_nupa_dev = kmalloc(sizeof(struct nupa_dev), GFP_KERNEL);
     if(!g_nupa_dev) {
         printk("[Error] Create nupa_dev failed \r\n");
@@ -389,8 +386,7 @@ static int __init blockdev_init(void)
 #if LOCAL_RAMDISK_TEST
     g_nupa_dev->nupa_buf = kmalloc(NUPA_DISK_SIZE, GFP_KERNEL);
 #else
-    base_addr = (unsigned long)ioremap(RESERVE_MEM_START, NUPA_DISK_SIZE);
-    g_nupa_dev->nupa_buf = (void*)base_addr;
+    g_nupa_dev->nupa_buf = ioremap(RESERVE_MEM_START, NUPA_DISK_SIZE);
 #endif
 #if DEBUG
     simple_buf_test(g_nupa_dev->nupa_buf, 1024 * 1024);

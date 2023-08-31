@@ -40,6 +40,8 @@ enum req_type {
 
 struct nupa_queue_entry {
     unsigned long pb;
+    unsigned long offset;
+    unsigned long length;
     enum req_type req; 
 };
 

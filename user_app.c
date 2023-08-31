@@ -67,7 +67,7 @@ static void nupa_meta_data_init(void* base_addr)
 
     g_nupa_com_queue = (struct queue *)((char*)g_nupa_sub_queue + sizeof(struct queue) + QUEUE_SIZE * sizeof(struct nupa_queue_entry));
     g_nupa_com_queue->size = QUEUE_SIZE;
-    printk("[nupa_meta_data_init] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_com_queue = %px \r\n", g_meta_info_header, g_nupa_sub_queue, g_nupa_com_queue);
+    printf("[nupa_meta_data_init] g_meta_info_header = %px, g_nupa_sub_queue = %px , g_nupa_com_queue = %px \r\n", g_meta_info_header, g_nupa_sub_queue, g_nupa_com_queue);
 #ifndef USER_APP
     spin_lock_init(&g_queue_lock);
 #endif
@@ -118,7 +118,7 @@ static void sigcb(int signo)
         break;
     case SIGINT://Ctrl+C
         printf("Get a signal -- SIGINT\n");
-    g_interrupt = 1;
+        g_interrupt = 1;
         break;
     case SIGQUIT:
         printf("Get a signal -- SIGQUIT\n");
@@ -139,7 +139,7 @@ int main(void)
     signal(SIGINT, sigcb);
     signal(SIGQUIT, sigcb);
    
-    uio_fd = open(UIO_DEV, /*O_RDONLY*/O_RDWR);  
+    uio_fd = open(UIO_DEV, O_RDWR);  
     addr_fd = open(UIO_ADDR, O_RDONLY);  
     size_fd = open(UIO_SIZE, O_RDONLY);
     storage_fd = open(STORAGE_FILE, O_RDWR);  
@@ -168,8 +168,6 @@ int main(void)
 #endif
 
     nupa_meta_data_init(access_address);
-
-
 
     while(1) {
 
