@@ -89,10 +89,12 @@ static int nupa_fops_getgeo(struct block_device *bdev, struct hd_geometry *geo)
     return 0;
 }
 
-static void sync_read(unsigned long pb)
+static void sync_read(unsigned long pb, unsigned long offset, unsigned long length)
 {
     struct nupa_queue_entry tmp_entry = {
         .pb = pb,
+        .offset = offset,
+        .length = length,
         .req = REQ_READ,
     };
     //push into sub queue
@@ -174,7 +176,7 @@ static void nupa_process_read(void* u_buf, void* k_buf, unsigned long start, str
             *  2. set pb
             *  3. do local copy
             */
-            sync_read(pb);
+            sync_read(pb, addr, size);
             g_meta_info_header->vb[vb] = pb;
         } else if(g_meta_info_header->vb[vb] != pb) {
             /**
@@ -184,7 +186,7 @@ static void nupa_process_read(void* u_buf, void* k_buf, unsigned long start, str
             */
             printk("[Read] local cache miss\r\n");
             while(is_vb_dirty(vb, g_meta_info_header->dirty_bit_map));
-            sync_read(pb);
+            sync_read(pb, addr, size);
             g_meta_info_header->vb[vb] = pb;
         }else if(g_meta_info_header->vb[vb] == pb) {
             /**

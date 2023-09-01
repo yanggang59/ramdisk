@@ -80,8 +80,11 @@ static void user_process_write(struct nupa_queue_entry* cur_entry, int fd)
 {
     unsigned long pb = cur_entry->pb;
     unsigned long vb = pb % CACHE_BLOCK_NUM;
-    off_t offset = pb * NUPA_BLOCK_SIZE + cur_entry->offset;
-    void* buf = g_k_buf + vb * NUPA_BLOCK_SIZE;
+    off_t p_offset = pb * NUPA_BLOCK_SIZE;
+    off_t v_offset = vb * NUPA_BLOCK_SIZE;
+
+    memcpy(g_u_buf + p_offset + cur_entry->offset, g_k_buf + v_offset + cur_entry->offset, cur_entry.length);
+
     struct nupa_queue_entry tmp_entry = {
         .pb = pb,
         .req = REQ_WRITE,
@@ -100,13 +103,16 @@ static void user_process_read(struct nupa_queue_entry* cur_entry, int fd)
 {
     unsigned long pb = cur_entry->pb;
     unsigned long vb = pb % CACHE_BLOCK_NUM;
-    off_t offset = pb * NUPA_BLOCK_SIZE;
-    void* buf = g_k_buf + vb * NUPA_BLOCK_SIZE;
-    lseek(fd, offset, SEEK_SET);
-    read(fd, buf, NUPA_BLOCK_SIZE);
+    off_t p_offset = pb * NUPA_BLOCK_SIZE;
+    off_t v_offset = vb * NUPA_BLOCK_SIZE;
+
+    memcpy(g_k_buf + v_offset + cur_entry->offset, g_u_buf + p_offset + cur_entry->offset, cur_entry.length);
+
     struct nupa_queue_entry tmp_entry = {
         .pb = pb,
         .req = REQ_READ,
+        .offset = cur_entry->offset,
+        .length = cur_entry->length,
     };
     //push into com queue
     while(qpush(g_nupa_com_queue, &tmp_entry, sizeof(struct nupa_queue_entry)));
