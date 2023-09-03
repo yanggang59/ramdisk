@@ -15,7 +15,7 @@
 #define UIO_ADDR                            "/sys/class/uio/uio0/maps/map0/addr"  
 #define UIO_SIZE                            "/sys/class/uio/uio0/maps/map0/size"
 #define STORAGE_FILE                        "./test.img"
-#define LOCAL_STORAGE_SIZE                  (16 << 30)UL
+#define LOCAL_STORAGE_SIZE                  (16UL << 30)
 #define DEBUG                               1
   
 static char uio_addr_buf[30], uio_size_buf[30];
@@ -83,7 +83,7 @@ static void user_process_write(struct nupa_queue_entry* cur_entry, int fd)
     off_t p_offset = pb * NUPA_BLOCK_SIZE;
     off_t v_offset = vb * NUPA_BLOCK_SIZE;
 
-    memcpy(g_u_buf + p_offset + cur_entry->offset, g_k_buf + v_offset + cur_entry->offset, cur_entry.length);
+    memcpy(g_u_buf + p_offset + cur_entry->offset, g_k_buf + v_offset + cur_entry->offset, cur_entry->length);
 
     struct nupa_queue_entry tmp_entry = {
         .pb = pb,
@@ -106,7 +106,7 @@ static void user_process_read(struct nupa_queue_entry* cur_entry, int fd)
     off_t p_offset = pb * NUPA_BLOCK_SIZE;
     off_t v_offset = vb * NUPA_BLOCK_SIZE;
 
-    memcpy(g_k_buf + v_offset + cur_entry->offset, g_u_buf + p_offset + cur_entry->offset, cur_entry.length);
+    memcpy(g_k_buf + v_offset + cur_entry->offset, g_u_buf + p_offset + cur_entry->offset, cur_entry->length);
 
     struct nupa_queue_entry tmp_entry = {
         .pb = pb,
@@ -142,6 +142,9 @@ int main(void)
     void* uio_addr;
     off_t offset = 0; 
     struct nupa_queue_entry cur_entry;
+
+    // printf("sizeof(size_t) = %d \r\n", sizeof(size_t));
+    // return 0;
 
     signal(SIGHUP, sigcb);
     signal(SIGINT, sigcb);
