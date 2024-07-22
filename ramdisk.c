@@ -6,104 +6,178 @@
 #include <linux/bitops.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include <linux/pgtable.h>
 #include <linux/hdreg.h>
+#include <asm/setup.h>
+#include <linux/ioctl.h>
+#include <linux/types.h>
+#include <linux/errno.h>
+#include <linux/aer.h>
+#include <linux/memremap.h>
+#include "ramdisk.h"
 
 
-#define DEVICE_NAME "ramdisk"
+struct ramdisk_dev g_ramdisk_dev;
 
-#define RAMDISK_SIZE 1024*1024*2
+#define DEVICE_NAME                 "ramdisk"
+#define DRV_MODULE_NAME             "ramdisk_module"
+#define RAMDISK_SIZE                (1 * 1024 * 1024)
 
-static DEFINE_SPINLOCK(ramdisk_lock);
-
-static struct gendisk *ramdisk_gendisk;
-static struct request_queue *ramdisk_queue;
-
-static int major;
-static char* ramdisk_buf;
+MODULE_AUTHOR("Clussys, Inc.");
+MODULE_LICENSE("Dual BSD/GPL");
 
 
-static int ramdisk_getgeo(struct block_device *dev, struct hd_geometry *geo)
+static void write_ramdisk(void *addr, struct page *page, unsigned int off, unsigned int len)
 {
-    /* 这是相对于机械硬盘的概念 */
-    geo->heads = 2;            /* 磁头 */
-    geo->cylinders = 32;    /* 柱面 */
-    geo->sectors = RAMDISK_SIZE / (2 * 32 *512); /* 一个磁道上的扇区数量 */
-    return 0;
+	unsigned int chunk;
+	void *mem;
+
+	while (len) {
+		mem = kmap_atomic(page);
+		chunk = min_t(unsigned int, len, PAGE_SIZE - off);
+		memcpy_flushcache(addr, mem + off, chunk);
+		kunmap_atomic(mem);
+		len -= chunk;
+		off = 0;
+		page++;
+		addr += chunk;
+	}
 }
 
-
-static const struct block_device_operations ramdisk_fops =
+static blk_status_t read_ramdisk(struct page *page, unsigned int off, void *addr, unsigned int len)
 {
-    .owner        = THIS_MODULE,
-    .getgeo = ramdisk_getgeo,
+	unsigned int chunk;
+	unsigned long rem;
+	void *mem;
+
+	while (len) {
+		mem = kmap_atomic(page);
+		chunk = min_t(unsigned int, len, PAGE_SIZE - off);
+		rem = copy_mc_to_kernel(mem + off, addr, chunk);
+		kunmap_atomic(mem);
+		if (rem)
+			return BLK_STS_IOERR;
+		len -= chunk;
+		off = 0;
+		page++;
+		addr += chunk;
+	}
+	return BLK_STS_OK;
+}
+
+static blk_status_t ramdisk_do_read(struct ramdisk_dev* r_dev, struct page *page, unsigned int page_off, sector_t sector, unsigned int len)
+{
+	blk_status_t rc;
+	phys_addr_t off = sector * 512 ;
+	void *addr = r_dev->virt_addr + off;
+	rc = read_ramdisk(page, page_off, addr, len);
+	flush_dcache_page(page);
+	return rc;
+}
+
+static blk_status_t ramdisk_do_write(struct ramdisk_dev* r_dev, struct page *page, unsigned int page_off, sector_t sector, unsigned int len)
+{
+	phys_addr_t off = sector * 512 ;
+	void *addr = r_dev->virt_addr + off;
+	flush_dcache_page(page);
+	write_ramdisk(addr, page, page_off, len);
+	return BLK_STS_OK;
+}
+
+static int ramdisk_rw_page(struct block_device *bdev, sector_t sector, struct page *page, unsigned int op)
+{
+	struct ramdisk_dev* r_dev = bdev->bd_disk->private_data;
+	blk_status_t rc;
+	if (op_is_write(op))
+		rc = ramdisk_do_write(r_dev, page, 0, sector, thp_size(page));
+	else
+		rc = ramdisk_do_read(r_dev, page, 0, sector, thp_size(page));
+	if (rc == 0)
+		page_endio(page, op_is_write(op), 0);
+	return blk_status_to_errno(rc);
+}
+
+static blk_qc_t ramdisk_submit_bio(struct bio *bio)
+{
+	int ret = 0;
+	blk_status_t rc = 0;
+	bool do_acct;
+	unsigned long start;
+	struct bio_vec bvec;
+	struct bvec_iter iter;
+	struct ramdisk_dev* r_dev = bio->bi_bdev->bd_disk->private_data;
+
+	do_acct = blk_queue_io_stat(bio->bi_bdev->bd_disk->queue);
+	if (do_acct)
+		start = bio_start_io_acct(bio);
+	bio_for_each_segment(bvec, bio, iter) {
+		if (op_is_write(bio_op(bio)))
+			rc = ramdisk_do_write(r_dev, bvec.bv_page, bvec.bv_offset,
+				iter.bi_sector, bvec.bv_len);
+		else
+			rc = ramdisk_do_read(r_dev, bvec.bv_page, bvec.bv_offset,
+				iter.bi_sector, bvec.bv_len);
+		if (rc) {
+			bio->bi_status = rc;
+			break;
+		}
+	}
+	if (do_acct)
+		bio_end_io_acct(bio, start);
+
+	if (ret)
+		bio->bi_status = errno_to_blk_status(ret);
+
+	bio_endio(bio);
+	return BLK_QC_T_NONE;
+}
+
+static const struct block_device_operations ramdisk_fops = {
+	.owner =		THIS_MODULE,
+	.submit_bio =	ramdisk_submit_bio,
+	.rw_page =		ramdisk_rw_page,
 };
 
-static void ramdisk_transfer(struct request *req)
-{    
-    unsigned long start = blk_rq_pos(req) << 9;      /* blk_rq_pos获取到的是扇区地址，左移9位转换为字节地址 */
-    unsigned long len  = blk_rq_cur_bytes(req);        /* 大小   */
-
-    static int w_cnt = 0;
-    static int r_cnt = 0;
-    void *buffer = bio_data(req->bio);        
-    
-    if(rq_data_dir(req) == READ) {
-        printk("[Info] do_ramdisk_request read %d \r\n", ++r_cnt);
-        memcpy(buffer, ramdisk_buf + start, len);
-    } else if(rq_data_dir(req) == WRITE) {
-        printk("[Info] do_ramdisk_request write %d \r\n", ++w_cnt);
-        memcpy(ramdisk_buf + start, buffer, len);
-    }
-
-}
-
-
-static void do_ramdisk_request(struct request_queue *q)
+static int disk_init(struct ramdisk_dev* r_dev)
 {
-    int err = 0;
-    struct request *req;
-
-    req = blk_fetch_request(q);
-    while(req != NULL) {
-
-        ramdisk_transfer(req);
-
-        if (!__blk_end_request_cur(req, err))
-            req = blk_fetch_request(q);
-    }
+	struct gendisk *disk;
+	struct request_queue *q;
+	disk = blk_alloc_disk(0);
+	if (!disk)
+		return -ENOMEM;
+	q = disk->queue;
+	r_dev->disk = disk;
+	blk_queue_physical_block_size(q, PAGE_SIZE);
+	blk_queue_logical_block_size(q, 512);
+	blk_queue_max_hw_sectors(q, UINT_MAX);
+	blk_queue_flag_set(QUEUE_FLAG_NONROT, q);
+	disk->fops		= &ramdisk_fops;
+	disk->private_data	= r_dev;
+	sprintf(disk->disk_name, "ramdisk");
+	set_capacity(disk, (r_dev->size) / 512);
+	device_add_disk(&r_dev->dev, disk, NULL);
+	return 0;
 }
 
 
 static int __init ramdisk_init(void)
 {
-    ramdisk_gendisk = alloc_disk(16);
-
-    ramdisk_queue = blk_init_queue(do_ramdisk_request, &ramdisk_lock);
-
-    major = register_blkdev(0, DEVICE_NAME);
-
-    ramdisk_gendisk->major = major;
-    ramdisk_gendisk->first_minor = 0;
-    ramdisk_gendisk->fops = &ramdisk_fops;
-    sprintf(ramdisk_gendisk->disk_name, "ramdisk");
-
-    ramdisk_gendisk->queue = ramdisk_queue;
-
-    add_disk(ramdisk_gendisk);
-    set_capacity(ramdisk_gendisk, RAMDISK_SIZE/512);
-
-    ramdisk_buf = kzalloc(RAMDISK_SIZE, GFP_KERNEL);
-
-    return 0;
+    int err;
+    device_initialize(&g_ramdisk_dev.dev);
+    dev_set_name(&g_ramdisk_dev.dev, "ramdisk");
+    err = device_add(&g_ramdisk_dev.dev);
+    if(err) {
+        return err;
+    }
+	g_ramdisk_dev.size = RAMDISK_SIZE;
+    g_ramdisk_dev.virt_addr = kmalloc(RAMDISK_SIZE, GFP_KERNEL);
+    return disk_init(&g_ramdisk_dev);
 }
 
-
-static void __exit ramdisk_exit(void)
+static __exit void ramdisk_exit(void)
 {
-    unregister_blkdev(major, DEVICE_NAME);
-    del_gendisk(ramdisk_gendisk);
-    put_disk(ramdisk_gendisk);
-    blk_cleanup_queue(ramdisk_queue);
+	del_gendisk(g_ramdisk_dev.disk);
+	blk_cleanup_disk(g_ramdisk_dev.disk);
 }
 
 
