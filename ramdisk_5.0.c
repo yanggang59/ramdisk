@@ -136,7 +136,10 @@ static int disk_init(struct ramdisk_dev* r_dev)
 	disk = alloc_disk_node(0, 0);
 	if (!disk)
 		return -ENOMEM;
-	q = disk->queue;
+	q = blk_alloc_queue_node(GFP_KERNEL, dev_to_node(&r_dev->dev));
+	if (!q)
+		return -ENOMEM;
+	disk->queue = q;
 	q->queuedata = r_dev;
 	r_dev->disk = disk;
 	blk_queue_make_request(q, ramdisk_make_request);
