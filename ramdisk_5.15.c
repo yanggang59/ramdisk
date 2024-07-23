@@ -23,7 +23,7 @@ struct ramdisk_dev g_ramdisk_dev;
 #define DRV_MODULE_NAME             "ramdisk_module"
 #define RAMDISK_SIZE                (1 * 1024 * 1024)
 
-MODULE_AUTHOR("Clussys, Inc.");
+MODULE_AUTHOR("YangGang 1449381582@qq.com");
 MODULE_LICENSE("Dual BSD/GPL");
 
 
