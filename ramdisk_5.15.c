@@ -101,15 +101,9 @@ static blk_qc_t ramdisk_submit_bio(struct bio *bio)
 {
 	int ret = 0;
 	blk_status_t rc = 0;
-	bool do_acct;
-	unsigned long start;
 	struct bio_vec bvec;
 	struct bvec_iter iter;
 	struct ramdisk_dev* r_dev = bio->bi_bdev->bd_disk->private_data;
-
-	do_acct = blk_queue_io_stat(bio->bi_bdev->bd_disk->queue);
-	if (do_acct)
-		start = bio_start_io_acct(bio);
 	bio_for_each_segment(bvec, bio, iter) {
 		if (op_is_write(bio_op(bio)))
 			rc = ramdisk_do_write(r_dev, bvec.bv_page, bvec.bv_offset,
@@ -122,9 +116,6 @@ static blk_qc_t ramdisk_submit_bio(struct bio *bio)
 			break;
 		}
 	}
-	if (do_acct)
-		bio_end_io_acct(bio, start);
-
 	if (ret)
 		bio->bi_status = errno_to_blk_status(ret);
 
