@@ -1,6 +1,6 @@
 # ramdisk
 
 
-ramdisk.c runs on Linux4.xx
+ramdisk_5.0.c runs on Linux5.0
 
-blockdev.c runs on Linux5.15 - Linux6.x, maybe later
+ramdisk_5.15.c runs on Linux5.15
